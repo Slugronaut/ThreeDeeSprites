@@ -1,0 +1,18 @@
+{
+  "name": "com.postegames.threedeesprites",
+  "version": "1.0.0",
+  "displayName": "PEGGAME - Three Dee Sprites",
+  "description": "Realtime sprite prerendering system for converting 3D models to 2D sprite images during runtime.",
+  "unity": "2022.2",
+  "keywords": [
+    "sprite",
+    "rendering",
+    "prerender",
+    "2D"
+  ],
+  "author": {
+    "name": "Sluggy",
+    "email": "jcsluggy@gmail.com",
+    "url": "http:/postegames.com"
+  }
+}
