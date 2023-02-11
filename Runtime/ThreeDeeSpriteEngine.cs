@@ -441,10 +441,11 @@ namespace ThreeDee
             Assert.IsTrue(x + tileWidth <= TileCountX);
             Assert.IsTrue(y + tileHeight <= TileCountY);
         }
-#endregion
+        #endregion
 
 
-        #if UNITY_EDITOR
+        #region Editor
+#if UNITY_EDITOR
         /// <summary>
         /// Validates the inspector input.
         /// </summary>
@@ -462,7 +463,8 @@ namespace ThreeDee
         }
 
         /// <summary>
-        /// Helper for visualizing what the fuck-the hell is actually fucking going the fuck on.
+        /// Helper for visualizing what the fuck-the-hell is actually fucking going the fuck on.
+        /// In other words; it draws the tile grid and allocated spaces for each sprite in the editor window.
         /// </summary>
         void DrawTiles()
         {
@@ -523,6 +525,7 @@ namespace ThreeDee
                 }
             }
         }
-        #endif
+#endif
+        #endregion
     }
 }
