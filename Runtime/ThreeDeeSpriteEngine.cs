@@ -1,4 +1,4 @@
-﻿//#define THREEDEE_UNPARENTMODEL
+﻿#define THREEDEE_UNPARENTMODEL
 
 using Sirenix.OdinInspector;
 using System.Collections.Generic;
@@ -17,17 +17,19 @@ namespace ThreeDee
             public Rect Rect;
             public int[] AllocatedTiles;
             public ThreeDeeSprite Ref;
+            #if THREEDEE_UNPARENTMODEL
             public Transform OriginalParent;
+            #endif
         }
 
 
-        #region Public Fields
+#region Public Fields
         public const int ExecutionOrder = 1000;
         public static ThreeDeeSpriteEngine Instance { get; private set; }
 
-        #if UNITY_EDITOR
+#if UNITY_EDITOR
         public bool DebugMode;
-        #endif
+#endif
 
         [SerializeField]
         [HideInInspector]
@@ -87,10 +89,10 @@ namespace ThreeDee
                 }
             }
         }
-        #endregion
+#endregion
 
 
-        #region Private Fields
+#region Private Fields
         int ScreenWidth;
         int ScreenHeight;
         int TileCountX;
@@ -102,10 +104,10 @@ namespace ThreeDee
         List<RenderCommand> Commands = new(100);
 
         float CameraRatio => ScreenHeight / _TileSize / 2 / _PixelScale;
-        #endregion
+#endregion
 
 
-        #region Unity Events
+#region Unity Events
         /// <summary>
         /// 
         /// </summary>
@@ -134,19 +136,19 @@ namespace ThreeDee
                 com.Obj.transform.SetGlobalScale(Vector3.one * com.SpriteScale);// com.TileResolution;
             }
 
-            #if UNITY_EDITOR
+#if UNITY_EDITOR
             if(DebugMode)
                 DrawTiles();
-            #endif
+#endif
 
             PrerenderCamera.Render();
             Commands.Clear();
         }
-        #endregion
+#endregion
 
         public static readonly int MainTexId = Shader.PropertyToID("_MainTex");
 
-        #region Public Functions
+#region Public Functions
         /// <summary>
         /// 
         /// </summary>
@@ -174,10 +176,10 @@ namespace ThreeDee
                     Rect = rect,
                     Ref = spriteRef,
                 };
-                #if THREEDEE_UNPARENTMODEL
+#if THREEDEE_UNPARENTMODEL
                 sprite.OriginalParent = spriteRef.ModelTrans.parent;
                 spriteRef.ModelTrans.SetParent(null);
-                #endif
+#endif
                 Sprites.Add(handle, sprite);
 
                 //spriteRef.SpriteBillboard.GetComponent<MeshRenderer>().material.SetTexture(MainTexId, _PrerenderCamera.targetTexture);
@@ -197,11 +199,11 @@ namespace ThreeDee
         /// <param name="handle"></param>
         public void ReleaseSprite(int handle)
         {
-            #if THREEDEE_UNPARENTMODEL
+#if THREEDEE_UNPARENTMODEL
             var tds = Sprites[handle].Ref;
             if(tds.isActiveAndEnabled)
                 Sprites[handle].Ref.ModelTrans.SetParent(Sprites[handle].OriginalParent);
-            #endif
+#endif
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
         }
@@ -234,10 +236,10 @@ namespace ThreeDee
             foreach (var handle in removeList)
                 Sprites.Remove(handle);
         }
-        #endregion
+#endregion
 
     
-        #region Private Functions
+#region Private Functions
         /// <summary>
         /// 
         /// </summary>
@@ -441,10 +443,10 @@ namespace ThreeDee
             Assert.IsTrue(x + tileWidth <= TileCountX);
             Assert.IsTrue(y + tileHeight <= TileCountY);
         }
-        #endregion
+#endregion
 
 
-        #region Editor
+#region Editor
 #if UNITY_EDITOR
         /// <summary>
         /// Validates the inspector input.
@@ -526,6 +528,6 @@ namespace ThreeDee
             }
         }
 #endif
-        #endregion
+#endregion
     }
 }

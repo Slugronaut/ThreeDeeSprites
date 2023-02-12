@@ -3,6 +3,9 @@ using UnityEngine;
 
 namespace ThreeDee
 {
+    /// <summary>
+    /// 
+    /// </summary>
     [DefaultExecutionOrder(ThreeDeeSpriteEngine.ExecutionOrder)]
     public class ThreeDeeSprite : MonoBehaviour
     {
@@ -10,7 +13,7 @@ namespace ThreeDee
         [HideInInspector]
         int _TileResolution = 1;
         [ShowInInspector]
-        [Tooltip("The number of tile chunks squared to use for rendering the model to a sprite. A tile chunk's size is defined within the ThreeDeeSpriteEngine.")]
+        [Tooltip("The number of tile chunks squared to use for rendering the model to a sprite. A tile chunk's size is defined within the ThreeDeeSpriteEngine. The more chunks used, the higher the sprite resolution.")]
         [MinValue(1)]
         public int TileResolution
         {
@@ -35,10 +38,30 @@ namespace ThreeDee
 
         [SerializeField]
         [HideInInspector]
-        float _SpriteScale = 1;
+        float _PreRenderScale = 1;
         [ShowInInspector]
-        [Tooltip("The scale of the model being rendered within the allocated pixel region of the pre-render texture.")]
-        [MinValue(0.01f)]
+        [Tooltip("The scale of the model being rendered within the allocated pixel region of the pre-render texture. This can be used to scale the 3D model so that it fits within the desired space of it's defined tile region. WARNING: If this value is too big the 3D model will overflow its tile bounds and bleed into other sprite tiles.")]
+        [MinValue(0.001f)]
+        public float PrerenderScale
+        {
+            get => _PreRenderScale;
+            set
+            {
+                if (_PreRenderScale != value)
+                {
+                    _PreRenderScale = value;
+                    //if (_SpriteBillboard != null)
+                    //    _SpriteBillboard.transform.localScale = Vector3.one / _SpriteScale;
+                }
+            }
+        }
+
+        [SerializeField]
+        [HideInInspector]
+        float _SpriteScale = 1;
+
+        [ShowInInspector]
+        [Tooltip("A uniform scale to apply to the sprite billboard. By default the billboard is a quad that is 1x1 world units in size.")]
         public float SpriteScale
         {
             get => _SpriteScale;
@@ -47,14 +70,14 @@ namespace ThreeDee
                 if (_SpriteScale != value)
                 {
                     _SpriteScale = value;
-                    //if (_SpriteBillboard != null)
-                    //    _SpriteBillboard.transform.localScale = Vector3.one / _SpriteScale;
+                    _SpriteBillboard.transform.localScale = Vector3.one * value;
                 }
             }
         }
 
-        [Tooltip("An offset used to refine position of the sprite within its allocated space.")]
-        public Vector2 Offset;
+
+        [Tooltip("An offset used to refine position of the sprite within its allocated tile space.")]
+        public Vector2 TileOffset;
 
         [SerializeField]
         [HideInInspector]
@@ -94,7 +117,7 @@ namespace ThreeDee
 
         private void Start()
         {
-            SpriteScale = _SpriteScale; //forces billboard to update
+            PrerenderScale = _PreRenderScale; //forces billboard to update
             AllocateSprite();
         }
 
@@ -114,15 +137,15 @@ namespace ThreeDee
         {
             if (SpriteHandle >= 0 && ChainHandle >= 0)
             {
-                ThreeDeeRenderChain.Instance.AddCommand(new RenderCommand()
-                {
-                    SpriteHandle = this.SpriteHandle,
-                    SpriteScale = this.SpriteScale,
-                    TileResolution = this.TileResolution,
-                    Offset = Offset,
-                    Obj = ModelTrans,
-                    ChainId = ChainHandle,
-                });
+                ThreeDeeRenderChain.Instance.AddCommand(
+                    new RenderCommand(
+                        this.SpriteHandle,
+                        this.TileResolution,
+                        this.PrerenderScale,
+                        TileOffset,
+                        ModelTrans,
+                        ChainHandle)
+                    );
             }
         }
 
