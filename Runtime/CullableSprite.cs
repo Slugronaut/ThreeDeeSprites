@@ -3,7 +3,7 @@
 namespace ThreeDee
 {
     /// <summary>
-    /// When the objec with this component is attached is determined to be culled it will disable
+    /// When the object with this component is attached is determined to be culled it will disable
     /// all objects in int's list. When it is visible they will be enabled instead.
     /// 
     /// This component uses culling groups to simplify the process so it is mostly suited to 2D culling only.
