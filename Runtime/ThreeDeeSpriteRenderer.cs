@@ -32,6 +32,8 @@ namespace ThreeDee
                             (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, ChainHandle);
                         }
                     }
+                    SpriteBillboardScale = TileResolution / PrerenderScale;
+                    AlignBillboard(_SpriteBillboardAlignment);
                 }
             }
         }
@@ -50,26 +52,27 @@ namespace ThreeDee
                 if (_PreRenderScale != value)
                 {
                     _PreRenderScale = value;
-                    //if (_SpriteBillboard != null)
-                    //    _SpriteBillboard.transform.localScale = Vector3.one / _SpriteScale;
+                    SpriteBillboardScale = TileResolution / PrerenderScale;
+                    AlignBillboard(_SpriteBillboardAlignment);
                 }
             }
         }
-
+       
         [SerializeField]
         [HideInInspector]
-        float _SpriteScale = 1;
+        float _SpriteBillboardScale = 1;
 
         [ShowInInspector]
-        [Tooltip("A uniform scale to apply to the sprite billboard. By default the billboard is a quad that is 1x1 world units in size.")]
-        public float SpriteScale
+        [ReadOnly]
+        [Tooltip("A uniform scale to apply to the sprite billboard. This is equal to the Tile Resolution divided by the Prerender Scale and is used to determine the uniform scale of the sprite billboard quad so that it maintains a worldspace size equal to that of the original model.")]
+        public float SpriteBillboardScale
         {
-            get => _SpriteScale;
-            set
+            get => _SpriteBillboardScale;
+            private set
             {
-                if (_SpriteScale != value)
+                if (_SpriteBillboardScale != value)
                 {
-                    _SpriteScale = value;
+                    _SpriteBillboardScale = value;
                     _SpriteBillboard.transform.localScale = Vector3.one * value;
                 }
             }
@@ -77,6 +80,56 @@ namespace ThreeDee
 
         [Tooltip("An offset used to refine position of the sprite within its allocated tile space.")]
         public Vector2 TileOffset;
+
+        [SerializeField]
+        [HideInInspector]
+        SpriteAlignment _SpriteBillboardAlignment = SpriteAlignment.BottomCenter;
+
+        [ShowInInspector]
+        [Tooltip("How the billboard sprite quad is aligned relative to its scale.")]
+        public SpriteAlignment SpriteBillboardAlignment
+        {
+            get => _SpriteBillboardAlignment;
+            set
+            {
+                if(value != _SpriteBillboardAlignment)
+                {
+                    _SpriteBillboardAlignment = value;
+                    AlignBillboard(value);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Helper for repositioning the billboard quad based on alignment and scale.
+        /// Currently only support Center, TopCenter, ad BottomCenter.
+        /// </summary>
+        void AlignBillboard(SpriteAlignment alignment)
+        {
+            switch(alignment)
+            {
+                case SpriteAlignment.Center:
+                    {
+                        _SpriteBillboard.transform.localPosition = Vector3.zero;
+                        break;
+                    }
+                case SpriteAlignment.BottomCenter:
+                    {
+                        _SpriteBillboard.transform.localPosition = new Vector3(0, _SpriteBillboardScale / 2, 0);
+                        break;
+                    }
+                case SpriteAlignment.TopCenter:
+                    {
+                        _SpriteBillboard.transform.localPosition = new Vector3(0, _SpriteBillboardScale + (_SpriteBillboardScale / 2), 0);
+                        break;
+                    }
+                default:
+                    {
+                        _SpriteBillboard.transform.localPosition = new Vector3(0, 0, 0);
+                        break;
+                    }
+            }
+        }
 
         [SerializeField]
         [HideInInspector]
