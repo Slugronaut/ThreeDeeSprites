@@ -161,18 +161,21 @@ namespace ThreeDee
             float prs = _PreRenderScale;
             PrerenderScale = 104.375f;
             PrerenderScale = prs;
-            AllocateSprite();
         }
 
         private void OnEnable()
         {
-            AllocateSprite();
-
             //make a one-time request for our section of the render texture.
             //this only needs to be done again if we reallocate the sprite
             //We need to add a delay of at least 1 frame or the surface's command
             //buffer may be wiped before we ever process it
-            Invoke(nameof(IssueRenderRequest), 0.05f);
+            Invoke(nameof(Init), 0.05f);
+        }
+
+        private void Init()
+        {
+            AllocateSprite();
+            IssueRenderRequest();
         }
 
         private void OnDisable()
@@ -206,7 +209,7 @@ namespace ThreeDee
         /// </summary>
         void AllocateSprite()
         {
-            if (ThreeDeeSpriteSurface.Instance != null && SpriteHandle < 0)
+            if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
                 (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId);
         }
 

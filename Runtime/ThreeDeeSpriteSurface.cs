@@ -31,7 +31,6 @@ namespace ThreeDee
 
 #region Public Fields
         public const int ExecutionOrder = 1000;
-        public static ThreeDeeSpriteSurface Instance { get; private set; }
 
 #if UNITY_EDITOR
         public bool DebugMode;
@@ -120,7 +119,7 @@ namespace ThreeDee
         private void Awake()
         {
             CreateTileMap(_TileSize);
-            Instance = this;
+            _PrerenderCamera.enabled = false; //we don't need this rendering every frame, we'll be doing that manually.
         }
 
         /// <summary>
@@ -147,7 +146,7 @@ namespace ThreeDee
                 DrawTiles();
 #endif
 
-            PrerenderCamera.Render();
+            _PrerenderCamera.Render();
             Commands.Clear();
         }
 #endregion
