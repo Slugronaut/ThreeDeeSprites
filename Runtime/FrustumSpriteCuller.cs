@@ -5,7 +5,8 @@ using UnityEngine;
 namespace ThreeDee
 {
     /// <summary>
-    /// 
+    /// TODO: The best way I can think of to handle shadow casters is to somehow mask the section of the rendertexture so that it
+    /// isn't cleared
     /// </summary>
     public class FrustumSpriteCuller : MonoBehaviour
     {
@@ -44,12 +45,6 @@ namespace ThreeDee
             if (SpriteBillboardRenderer == null ||
                 Cam == null) return;
 
-            bool flag = IsVisible(Cam, SpriteBillboardRenderer.bounds);
-            foreach (var go in ObjectsToCull)
-            {
-                go.SetActive(flag);
-            }
-            /*
             if(IsVisible(Cam, SpriteBillboardRenderer.bounds))
             {
                 if (LastVisibleState == VisibilityStates.Visible) return;
@@ -74,7 +69,6 @@ namespace ThreeDee
                 }
                 LastVisibleState= VisibilityStates.Invisible;
             }
-            */
         }
 
         /// <summary>
