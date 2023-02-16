@@ -1,4 +1,5 @@
 using Sirenix.OdinInspector;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace ThreeDee
@@ -33,7 +34,7 @@ namespace ThreeDee
                         }
                     }
                     SpriteBillboardScale = TileResolution / PrerenderScale;
-                    AlignBillboard(_SpriteBillboardAlignment);
+                    AlignBillboard();
                 }
             }
         }
@@ -53,7 +54,7 @@ namespace ThreeDee
                 {
                     _PreRenderScale = value;
                     SpriteBillboardScale = TileResolution / PrerenderScale;
-                    AlignBillboard(_SpriteBillboardAlignment);
+                    AlignBillboard();
                 }
             }
         }
@@ -78,56 +79,41 @@ namespace ThreeDee
             }
         }
 
-        [Tooltip("An offset used to refine position of the sprite within its allocated tile space.")]
-        public Vector2 TileOffset;
-
         [SerializeField]
         [HideInInspector]
-        SpriteAlignment _SpriteBillboardAlignment = SpriteAlignment.BottomCenter;
+        public Vector2 _TileOffset;
 
+        [Tooltip("An offset used to refine position of the sprite within its allocated tile space.")]
         [ShowInInspector]
-        [Tooltip("How the billboard sprite quad is aligned relative to its scale.")]
-        public SpriteAlignment SpriteBillboardAlignment
+        public Vector2 TileOffset
         {
-            get => _SpriteBillboardAlignment;
+            get => _TileOffset;
             set
             {
-                if(value != _SpriteBillboardAlignment)
+                if (_TileOffset != value)
                 {
-                    _SpriteBillboardAlignment = value;
-                    AlignBillboard(value);
+                    _TileOffset = value;
+                    AlignBillboard();
                 }
             }
         }
 
-        /// <summary>
-        /// Helper for repositioning the billboard quad based on alignment and scale.
-        /// Currently only support Center, TopCenter, ad BottomCenter.
-        /// </summary>
-        void AlignBillboard(SpriteAlignment alignment)
+        [SerializeField]
+        [HideInInspector]
+        public Vector3 _BillboardOffset;
+
+        [Tooltip("An offset used to refine position of the sprite billboard in worldspace relative to it's parent.")]
+        [ShowInInspector]
+        public Vector3 BillboardOffset
         {
-            switch(alignment)
+            get => _BillboardOffset;
+            set
             {
-                case SpriteAlignment.Center:
-                    {
-                        _SpriteBillboard.transform.localPosition = Vector3.zero;
-                        break;
-                    }
-                case SpriteAlignment.BottomCenter:
-                    {
-                        _SpriteBillboard.transform.localPosition = new Vector3(0, _SpriteBillboardScale / 2, 0);
-                        break;
-                    }
-                case SpriteAlignment.TopCenter:
-                    {
-                        _SpriteBillboard.transform.localPosition = new Vector3(0, _SpriteBillboardScale + (_SpriteBillboardScale / 2), 0);
-                        break;
-                    }
-                default:
-                    {
-                        _SpriteBillboard.transform.localPosition = new Vector3(0, 0, 0);
-                        break;
-                    }
+                if(_BillboardOffset != value)
+                {
+                    _BillboardOffset = value;
+                    AlignBillboard();
+                }
             }
         }
 
@@ -161,8 +147,8 @@ namespace ThreeDee
             }
         }
 
-        [Tooltip("This can be used to forceably set the chain id you want this sprite to be created for. Any value less than zero will result in the first chain with available space being used.")]
-        public int ForcedChainId = -1;
+        [Tooltip("This can be used to forceably set the surface id you want this sprite to be created for. Any value less than zero will result in the first surface with available space being used.")]
+        public int SurfaceId = -1;
 
         int SpriteHandle = -1;
         int ChainHandle = -1;
@@ -171,13 +157,22 @@ namespace ThreeDee
 
         private void Start()
         {
-            PrerenderScale = _PreRenderScale; //forces billboard to update
+            //forces billboard to update
+            float prs = _PreRenderScale;
+            PrerenderScale = 104.375f;
+            PrerenderScale = prs;
             AllocateSprite();
         }
 
         private void OnEnable()
         {
             AllocateSprite();
+
+            //make a one-time request for our section of the render texture.
+            //this only needs to be done again if we reallocate the sprite
+            //We need to add a delay of at least 1 frame or the surface's command
+            //buffer may be wiped before we ever process it
+            Invoke(nameof(IssueRenderRequest), 0.05f);
         }
 
         private void OnDisable()
@@ -187,7 +182,10 @@ namespace ThreeDee
             ChainHandle = -1;
         }
 
-        void LateUpdate()
+        /// <summary>
+        /// 
+        /// </summary>
+        void IssueRenderRequest()
         {
             if (SpriteHandle >= 0 && ChainHandle >= 0)
             {
@@ -203,12 +201,24 @@ namespace ThreeDee
             }
         }
 
+        /// <summary>
+        /// Helper metho used to initialize this sprite on a surface chain.
+        /// </summary>
         void AllocateSprite()
         {
             if (ThreeDeeSpriteSurface.Instance != null && SpriteHandle < 0)
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, ForcedChainId);
+                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId);
         }
 
+
+        /// <summary>
+        /// Helper for repositioning the billboard quad based on alignment and scale.
+        /// Currently only supports Center, TopCenter, ad BottomCenter.
+        /// </summary>
+        void AlignBillboard()
+        {
+            _SpriteBillboard.transform.localPosition = _BillboardOffset + (new Vector3(0, -_TileOffset.y, 0) * SpriteBillboardScale);
+        }
     }
 
 
