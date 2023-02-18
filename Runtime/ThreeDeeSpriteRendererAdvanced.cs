@@ -7,7 +7,7 @@ namespace ThreeDee
     /// A renderer for an individual sprite. This is used in a way similar to a MeshRenderer or SpriteRenderer component.
     /// </summary>
     [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder)]
-    public class ThreeDeeSpriteRenderer : MonoBehaviour, IThreeDeeSpriteRenderer
+    public class ThreeDeeSpriteRendererAdvanced : MonoBehaviour, IThreeDeeSpriteRenderer
     {
         [SerializeField]
         [HideInInspector]
@@ -187,6 +187,14 @@ namespace ThreeDee
         /// <summary>
         /// 
         /// </summary>
+        private void LateUpdate()
+        {
+            IssueRenderRequest();
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
         void IssueRenderRequest()
         {
 #if UNITY_EDITOR
@@ -194,7 +202,7 @@ namespace ThreeDee
 #endif
             if (SpriteHandle >= 0 && ChainHandle >= 0)
             {
-                ThreeDeeSurfaceChain.Instance.AddCommand(
+                ThreeDeeSurfaceChain.Instance.AddCommandAdvanced(
                     new RenderCommand(
                         this.SpriteHandle,
                         this.TileResolution,

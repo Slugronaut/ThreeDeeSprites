@@ -1,4 +1,14 @@
-﻿#define THREEDEE_UNPARENTMODEL
+﻿//When using non-dynamic sprite renderers it can be slightly more performant
+//to move the model out of the hierarchy entirely. This means fewer messages
+//being sent around when it is moved as well as when the entity it represents
+//is moved. During test however it is MUCH easier to keep the model with the
+//entity so this is left commented in.
+//
+//I didn't opt for conditionally defining it for release since it could cause
+//things to break in unexpected ways if someone codes logic that depends on it
+//being one way or the other.
+//#define THREEDEE_UNPARENTMODEL
+
 
 using Sirenix.OdinInspector;
 using System.Collections.Generic;
@@ -22,14 +32,14 @@ namespace ThreeDee
         {
             public Rect Rect;
             public int[] AllocatedTiles;
-            public ThreeDeeSpriteRenderer Ref;
+            public IThreeDeeSpriteRenderer Ref;
             #if THREEDEE_UNPARENTMODEL
             public Transform OriginalParent;
             #endif
         }
 
 
-#region Public Fields
+        #region Public Fields
         public const int ExecutionOrder = 1000;
 
 #if UNITY_EDITOR
@@ -94,10 +104,10 @@ namespace ThreeDee
                 }
             }
         }
-#endregion
+        #endregion
 
 
-#region Private Fields
+        #region Private Fields
         int ScreenWidth;
         int ScreenHeight;
         int TileCountX;
@@ -105,19 +115,26 @@ namespace ThreeDee
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
 
         List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
-        Dictionary<int, RegisteredSprite> Sprites = new();
-        List<RenderCommand> Commands = new(100);
+        readonly Dictionary<int, RegisteredSprite> Sprites = new();
+        readonly List<RenderCommand> Commands = new(100);
+        readonly List<RenderCommand> DynamicCommands = new(100);
 
-        float CameraRatio => ScreenHeight / _TileSize / 2 / _PixelScale;
-#endregion
+        float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
+
+        public static readonly int MainTexId = Shader.PropertyToID("_MainTex");
+        static readonly int SpriteTransforms = Shader.PropertyToID(nameof(SpriteTransforms));
+        static readonly List<Matrix4x4> DynamicSpriteTransforms = new(ThreeDeeSurfaceChain.MaxSprites);
+        #endregion
 
 
-#region Unity Events
+        #region Unity Events
         /// <summary>
         /// 
         /// </summary>
         private void Awake()
         {
+            DynamicCommands.Clear();
+            DynamicSpriteTransforms.AddRange(new Matrix4x4[ThreeDeeSurfaceChain.MaxSprites]);
             CreateTileMap(_TileSize);
             _PrerenderCamera.enabled = false; //we don't need this rendering every frame, we'll be doing that manually.
         }
@@ -127,33 +144,53 @@ namespace ThreeDee
         /// </summary>
         void LateUpdate()
         {
+#if UNITY_EDITOR
+            if (!Application.isPlaying) return;
+#endif
+            Render();
+        }
+        #endregion
+
+
+        #region Public Functions
+        /// <summary>
+        /// Renders allocated sprites to the surface's associated camera. Static sprites are left as is and
+        /// are assumed to have been positioned ahead of time. Dynamic sprites have their position information
+        /// uploaded to the global pre-render shader so that they can remain in world-space while
+        /// </summary>
+        public void Render()
+        {
             if (PrerenderCamera == null) return;
             PrerenderCamera.orthographicSize = CameraRatio;
 
+            int spriteIndex = 0;
             foreach (var com in Commands)
             {
                 if (com.SpriteHandle < 0) continue;
-                float tileScale =  _TileSize * com.TileResolution;
+                float tileScale = _TileSize * com.TileResolution;
                 tileScale /= ScreenHeight;
                 var center = Sprites[com.SpriteHandle].Rect.center + com.Offset * tileScale;
                 var pos = PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f));
                 com.Obj.position = pos;
                 com.Obj.transform.SetGlobalScale(Vector3.one * com.SpriteScale);// com.TileResolution;
+
+                //TODO: This should eventually go in the 'DynamicCommands' process loop - just testing for now
+                Matrix4x4 m = Matrix4x4.identity;
+                Matrix4x4.Translate(pos);
+                DynamicSpriteTransforms[spriteIndex] = m;
+                Shader.SetGlobalVector("_SpritePos", new Vector4(pos.x, pos.y, pos.z, 1));
+                spriteIndex++;
             }
 
+            Shader.SetGlobalMatrixArray(SpriteTransforms, DynamicSpriteTransforms);
+
 #if UNITY_EDITOR
-            if(DebugMode)
+            if (DebugMode)
                 DrawTiles();
 #endif
-
             _PrerenderCamera.Render();
             Commands.Clear();
         }
-#endregion
-
-        public static readonly int MainTexId = Shader.PropertyToID("_MainTex");
-
-#region Public Functions
         /// <summary>
         /// 
         /// </summary>
@@ -164,11 +201,20 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="com"></param>
+        public void AddDynamicCommand(RenderCommand com)
+        {
+            this.DynamicCommands.Add(com);
+        }
+
+        /// <summary>
         /// Allocates a space of the render target for a sprite of the desired size squared and returns a handle for that space.
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns></returns>
-        public int AllocateNewSprite(ThreeDeeSpriteRenderer spriteRef)
+        public int AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef)
         {
             var (success, rect, indicies) = FindAvailableSpace(spriteRef.TileResolution);
             if (success)
@@ -241,10 +287,10 @@ namespace ThreeDee
             foreach (var handle in removeList)
                 Sprites.Remove(handle);
         }
-#endregion
+        #endregion
 
     
-#region Private Functions
+        #region Private Functions
         /// <summary>
         /// 
         /// </summary>
@@ -448,7 +494,7 @@ namespace ThreeDee
             Assert.IsTrue(x + tileWidth <= TileCountX);
             Assert.IsTrue(y + tileHeight <= TileCountY);
         }
-#endregion
+        #endregion
 
 
 #region Editor

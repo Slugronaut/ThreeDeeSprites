@@ -1,3 +1,4 @@
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Assertions;
 
@@ -16,8 +17,11 @@ namespace ThreeDee
     ///     -not properly allocate sprites to next surface in the chain if a previous one is full
     /// 
     /// </summary>
+    [ExecuteAlways]
     public class ThreeDeeSurfaceChain : MonoBehaviour
     {
+        public const int MaxSprites = 500; //hardcoded limit. if you change this be sure to change it in the shader too!!
+        public static readonly int ThreeDee_InPlayMode = Shader.PropertyToID(nameof(ThreeDee_InPlayMode));
         public static ThreeDeeSurfaceChain Instance { get; private set; }
         public ThreeDeeSpriteSurface[] Surfaces;
 
@@ -25,7 +29,26 @@ namespace ThreeDee
 
         public void Awake()
         {
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                //we need to do this so that in the editor when we are not in playmode
+                //it allows us to see the true position of the 3D model
+                Shader.SetGlobalInt(ThreeDee_InPlayMode, 0);
+                return;
+            }
+#endif
+
+            Shader.SetGlobalInt(ThreeDee_InPlayMode, 1);
             Instance = this;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        private void OnDestroy()
+        {
+            Shader.SetGlobalInt(ThreeDee_InPlayMode, 0);
         }
 
         /// <summary>
@@ -41,12 +64,27 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// Add an advanced render command to the command queue. The command is issued to the appropriate
+        /// RenderSurface based on its internal chain id.
+        /// 
+        /// Advanced commands are different from normal ones in that they must be issued every frame in order
+        /// for the object to continue being rendered.
+        /// </summary>
+        /// <param name="com"></param>
+        public void AddCommandAdvanced(RenderCommand com)
+        {
+            Assert.IsTrue(com.ChainId >= 0);
+            Assert.IsTrue(com.ChainId < Surfaces.Length);
+            Surfaces[com.ChainId].AddDynamicCommand(com);
+        }
+
+        /// <summary>
         /// Allocates a rectangular space on the render target for a sprite of the
         /// desired size squared and returns a handle for that space.
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns>The chain id and sprite handles.</returns>
-        public (int chainId, int spriteHandle) AllocateNewSprite(ThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1)
+        public (int chainId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1)
         {
             Assert.IsTrue(forcedChainId < Surfaces.Length);
 
