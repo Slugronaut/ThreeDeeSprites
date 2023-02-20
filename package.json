@@ -14,5 +14,8 @@
     "name": "Sluggy",
     "email": "jcsluggy@gmail.com",
     "url": "http:/postegames.com"
+  },
+  "dependencies": {
+    "com.postegames.mathutils": ""
   }
 }

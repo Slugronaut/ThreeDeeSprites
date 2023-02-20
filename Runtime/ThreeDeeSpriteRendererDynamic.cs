@@ -1,13 +1,15 @@
 using Sirenix.OdinInspector;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ThreeDee
 {
     /// <summary>
     /// A renderer for an individual sprite. This is used in a way similar to a MeshRenderer or SpriteRenderer component.
+    /// 
     /// </summary>
     [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder)]
-    public class ThreeDeeSpriteRendererAdvanced : MonoBehaviour, IThreeDeeSpriteRenderer
+    public class ThreeDeeSpriteRendererDynamic : MonoBehaviour, IThreeDeeSpriteRenderer
     {
         [SerializeField]
         [HideInInspector]
@@ -26,11 +28,8 @@ namespace ThreeDee
                     _TileResolution = value;
                     if (SpriteHandle >= 0)
                     {
-                        if (ThreeDeeSurfaceChain.Instance != null)
-                        {
-                            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle);
-                            (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, ChainHandle);
-                        }
+                        ReleaseSprite();
+                        AllocateSprite();
                     }
                     SpriteBillboardScale = TileResolution / PrerenderScale;
                     AlignBillboard();
@@ -151,7 +150,7 @@ namespace ThreeDee
 
         int SpriteHandle = -1;
         int ChainHandle = -1;
-
+        RenderCommandDynamic RenderCommand;
 
 
         private void Start()
@@ -179,9 +178,7 @@ namespace ThreeDee
 
         private void OnDisable()
         {
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle);
-            SpriteHandle = -1;
-            ChainHandle = -1;
+            ReleaseSprite();
         }
 
         /// <summary>
@@ -201,31 +198,51 @@ namespace ThreeDee
             if (!Application.isPlaying) return;
 #endif
             if (SpriteHandle >= 0 && ChainHandle >= 0)
-            {
-                ThreeDeeSurfaceChain.Instance.AddCommandAdvanced(
-                    new RenderCommand(
+                ThreeDeeSurfaceChain.Instance.AddCommand(RenderCommand);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        void GenerateCommand()
+        {
+            RenderCommand = new RenderCommandDynamic(
                         this.SpriteHandle,
                         this.TileResolution,
                         this.PrerenderScale,
                         TileOffset,
+                        Vector3.zero,
                         ModelTrans,
-                        ChainHandle)
-                    );
-            }
+                        ChainHandle
+                        );
         }
 
         /// <summary>
-        /// Helper metho used to initialize this sprite on a surface chain.
+        /// Helper method used to initialize this sprite on a surface chain.
         /// </summary>
         void AllocateSprite()
         {
-#if UNITY_EDITOR
+            #if UNITY_EDITOR
             if (!Application.isPlaying) return;
-#endif
+            #endif
             if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId);
+                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, false);
+
+            GenerateCommand();
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        void ReleaseSprite()
+        {
+            if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle >= 0)
+                return;
+
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
+            SpriteHandle = -1;
+            ChainHandle = -1;
+        }
 
         /// <summary>
         /// Helper for repositioning the billboard quad based on alignment and scale.

@@ -1,20 +1,10 @@
-﻿//When using non-dynamic sprite renderers it can be slightly more performant
-//to move the model out of the hierarchy entirely. This means fewer messages
-//being sent around when it is moved as well as when the entity it represents
-//is moved. During test however it is MUCH easier to keep the model with the
-//entity so this is left commented in.
-//
-//I didn't opt for conditionally defining it for release since it could cause
-//things to break in unexpected ways if someone codes logic that depends on it
-//being one way or the other.
-//#define THREEDEE_UNPARENTMODEL
-
-
-using Sirenix.OdinInspector;
+﻿using Sirenix.OdinInspector;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Toolbox.Math;
 using UnityEngine;
 using UnityEngine.Assertions;
+using UnityEngine.Rendering;
 using Debug = UnityEngine.Debug;
 
 namespace ThreeDee
@@ -24,8 +14,9 @@ namespace ThreeDee
     /// render-texture and all of the 3D models that drawn to it. However, this system isn't usually
     /// interacted with directly. Instead, higher-level wrapper call <see cref="ThreeDeeRenderChain"/> is used
     /// to manage a series of these surfaces and forward commands to them.
+    /// 
     /// </summary>
-    [DefaultExecutionOrder(ExecutionOrder+1)]
+    [DefaultExecutionOrder(ExecutionOrder + 1)]
     public class ThreeDeeSpriteSurface : MonoBehaviour
     {
         class RegisteredSprite
@@ -33,9 +24,7 @@ namespace ThreeDee
             public Rect Rect;
             public int[] AllocatedTiles;
             public IThreeDeeSpriteRenderer Ref;
-            #if THREEDEE_UNPARENTMODEL
             public Transform OriginalParent;
-            #endif
         }
 
 
@@ -57,7 +46,7 @@ namespace ThreeDee
             get => _PixelScale;
             set
             {
-                if(_PixelScale != value)
+                if (_PixelScale != value)
                 {
                     _PixelScale = value;
                     PrerenderCamera.orthographicSize = CameraRatio;
@@ -78,7 +67,7 @@ namespace ThreeDee
             get => _TileSize;
             set
             {
-                if(_TileSize != value)
+                if (_TileSize != value)
                 {
                     _TileSize = value;
                     CreateTileMap(value);
@@ -97,13 +86,14 @@ namespace ThreeDee
             get => _PrerenderCamera;
             set
             {
-                if(value != _PrerenderCamera)
+                if (value != _PrerenderCamera)
                 {
                     _PrerenderCamera = value;
                     CreateTileMap(_TileSize);
                 }
             }
         }
+        
         #endregion
 
 
@@ -114,16 +104,14 @@ namespace ThreeDee
         int TileCountY;
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
 
+        public static readonly int MainTexId = Shader.PropertyToID("_MainTex"); //used to access the texture of the RenderTarget
         List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
         readonly Dictionary<int, RegisteredSprite> Sprites = new();
-        readonly List<RenderCommand> Commands = new(100);
-        readonly List<RenderCommand> DynamicCommands = new(100);
+        readonly List<RenderCommand> StaticCommands = new(100);
+        readonly List<RenderCommandDynamic> DynamicCommands = new(100);
 
         float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
 
-        public static readonly int MainTexId = Shader.PropertyToID("_MainTex");
-        static readonly int SpriteTransforms = Shader.PropertyToID(nameof(SpriteTransforms));
-        static readonly List<Matrix4x4> DynamicSpriteTransforms = new(ThreeDeeSurfaceChain.MaxSprites);
         #endregion
 
 
@@ -134,9 +122,8 @@ namespace ThreeDee
         private void Awake()
         {
             DynamicCommands.Clear();
-            DynamicSpriteTransforms.AddRange(new Matrix4x4[ThreeDeeSurfaceChain.MaxSprites]);
             CreateTileMap(_TileSize);
-            _PrerenderCamera.enabled = false; //we don't need this rendering every frame, we'll be doing that manually.
+            _PrerenderCamera.enabled = false; //we don't need this rendering every frame, we'll be doing that manually
         }
 
         /// <summary>
@@ -145,9 +132,12 @@ namespace ThreeDee
         void LateUpdate()
         {
 #if UNITY_EDITOR
-            if (!Application.isPlaying) return;
+            if (DebugMode)
+                DrawTiles();
 #endif
-            Render();
+
+            RenderStatic();
+            //RenderDynamic();
         }
         #endregion
 
@@ -158,53 +148,138 @@ namespace ThreeDee
         /// are assumed to have been positioned ahead of time. Dynamic sprites have their position information
         /// uploaded to the global pre-render shader so that they can remain in world-space while
         /// </summary>
-        public void Render()
+        public void RenderStatic()
         {
             if (PrerenderCamera == null) return;
-            PrerenderCamera.orthographicSize = CameraRatio;
+            var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
 
-            int spriteIndex = 0;
-            foreach (var com in Commands)
+            //position all of the static models
+            foreach (var com in StaticCommands)
             {
                 if (com.SpriteHandle < 0) continue;
                 float tileScale = _TileSize * com.TileResolution;
                 tileScale /= ScreenHeight;
-                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset * tileScale;
-                var pos = PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f));
-                com.Obj.position = pos;
-                com.Obj.transform.SetGlobalScale(Vector3.one * com.SpriteScale);// com.TileResolution;
-
-                //TODO: This should eventually go in the 'DynamicCommands' process loop - just testing for now
-                Matrix4x4 m = Matrix4x4.identity;
-                Matrix4x4.Translate(pos);
-                DynamicSpriteTransforms[spriteIndex] = m;
-                Shader.SetGlobalVector("_SpritePos", new Vector4(pos.x, pos.y, pos.z, 1));
-                spriteIndex++;
+                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
+                com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+                com.ModelRoot.transform.SetGlobalScale(Vector3.one * com.SpriteScale);
             }
 
-            Shader.SetGlobalMatrixArray(SpriteTransforms, DynamicSpriteTransforms);
-
-#if UNITY_EDITOR
-            if (DebugMode)
-                DrawTiles();
-#endif
+            //then take a snapshot of all of them in one go
+            StaticCommands.Clear();
             _PrerenderCamera.Render();
-            Commands.Clear();
         }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="pos"></param>
+        /// <param name="rotation"></param>
+        public static void DrawDebugAxis(Vector3 pos, Quaternion rotation)
+        {
+            Debug.DrawRay(pos, rotation * Vector3.forward, Color.blue);
+            Debug.DrawRay(pos, rotation * Vector3.up, Color.green);
+            Debug.DrawRay(pos, rotation * Vector3.right, Color.red);
+            Debug.DrawLine(Vector3.zero, pos);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void RenderDynamic()
+        {
+            Debug.Log("Rendering...");
+            if (_PrerenderCamera == null) return;
+            var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
+
+
+            //position the camera for each dynamic model, then take a snapshot at each position
+            foreach (var com in DynamicCommands)
+            {
+                if (com.SpriteHandle < 0) continue;
+
+                com.ModelRoot.gameObject.SetActive(true);
+                float tileScale = _TileSize * com.TileResolution;
+                tileScale /= ScreenHeight;
+                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
+                var objOffsetPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+                var objScale = Vector3.one * com.SpriteScale;
+
+
+                com.ModelRoot.position = objOffsetPos;
+                com.ModelRoot.transform.SetGlobalScale(objScale);
+
+                var renderers = com.ModelRoot.GetComponentsInChildren<Renderer>();
+                foreach (var renderer in renderers)
+                {
+                }
+            }
+            
+            DynamicCommands.Clear();
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void RenderSingleDynamic()
+        {
+            if (PrerenderCamera == null) return;
+            _PrerenderCamera.orthographicSize = CameraRatio;
+
+            var camTrans = _PrerenderCamera.transform;
+            var originalCamPosition = camTrans.position;
+            var originalCamRotation = camTrans.rotation;
+            var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
+
+
+            //position the camera for each dynamic model, then take a snapshot at each position
+            foreach (var com in DynamicCommands)
+            {
+                if (com.SpriteHandle < 0) continue;
+
+                com.ModelRoot.gameObject.SetActive(true);
+                float tileScale = _TileSize * com.TileResolution;
+                tileScale /= ScreenHeight;
+                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
+                var objOffsetPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+                var objScale = Vector3.one * com.SpriteScale;
+
+
+                //rotate the pre-rendercamera based on position between model and player, then offset the camera in aim-space
+                //to ensure the model will be rendered within the assigned rect of the render texture.
+                Camera realCam = Camera.main;
+                //OLD TEST CODE
+                var camEuler = CameraRelativeFacing.QuantizedBillboardRotation(
+                                                            CameraRelativeFacing.YawAngleSnap,
+                                                            com.ModelRoot.position, 
+                                                            realCam.transform.position);
+                var camForward = Quaternion.Euler(camEuler) * Vector3.forward;
+                var camPos = MathUtils.ForwardSpaceOffset(com.ModelRoot.position, camForward, -objOffsetPos);
+
+                com.ModelRoot.transform.SetGlobalScale(objScale);
+                camTrans.eulerAngles = camEuler;
+                camTrans.position = camPos;
+                _PrerenderCamera.RenderDontRestore();
+            }
+
+            //OLD TEST CODE
+            camTrans.SetPositionAndRotation(originalCamPosition, originalCamRotation);
+            DynamicCommands.Clear();
+        }
+
         /// <summary>
         /// 
         /// </summary>
         /// <param name="com"></param>
         public void AddCommand(RenderCommand com)
         {
-            this.Commands.Add(com);
+            this.StaticCommands.Add(com);
         }
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="com"></param>
-        public void AddDynamicCommand(RenderCommand com)
+        public void AddCommand(RenderCommandDynamic com)
         {
             this.DynamicCommands.Add(com);
         }
@@ -214,7 +289,7 @@ namespace ThreeDee
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns></returns>
-        public int AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef)
+        public int AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, bool unparentModel)
         {
             var (success, rect, indicies) = FindAvailableSpace(spriteRef.TileResolution);
             if (success)
@@ -227,13 +302,24 @@ namespace ThreeDee
                     Rect = rect,
                     Ref = spriteRef,
                 };
-#if THREEDEE_UNPARENTMODEL
-                sprite.OriginalParent = spriteRef.ModelTrans.parent;
-                spriteRef.ModelTrans.SetParent(null);
-#endif
+
+                if (unparentModel)
+                {
+                    if (spriteRef.ModelTrans != null)
+                    {
+                        sprite.OriginalParent = spriteRef.ModelTrans.parent;
+                        spriteRef.ModelTrans.SetParent(null);
+                    }
+                }
+                else
+                {
+                    //if we aren't unparenting then its assumed this is a dynamic sprite. disable the renderer instead
+                    spriteRef.ModelTrans.gameObject.SetActive(false);
+                }
+
                 Sprites.Add(handle, sprite);
 
-                //spriteRef.SpriteBillboard.GetComponent<MeshRenderer>().material.SetTexture(MainTexId, _PrerenderCamera.targetTexture);
+                //spriteRef.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial.SetTexture(MainTexId, _PrerenderCamera.targetTexture);
 
                 AllocateSpriteTiles(handle, indicies);
                 ApplyTileRectToMesh(rect, spriteRef.SpriteBillboard.mesh);
@@ -248,13 +334,15 @@ namespace ThreeDee
         /// 
         /// </summary>
         /// <param name="handle"></param>
-        public void ReleaseSprite(int handle)
+        public void ReleaseSprite(int handle, bool unparentModel)
         {
-#if THREEDEE_UNPARENTMODEL
             var tds = Sprites[handle].Ref;
-            if(tds.isActiveAndEnabled)
-                Sprites[handle].Ref.ModelTrans.SetParent(Sprites[handle].OriginalParent);
-#endif
+            if (unparentModel)
+            {
+                if (tds.isActiveAndEnabled && tds.ModelTrans != null)
+                    tds.ModelTrans.SetParent(Sprites[handle].OriginalParent);
+            }
+            
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
         }
@@ -289,7 +377,7 @@ namespace ThreeDee
         }
         #endregion
 
-    
+        
         #region Private Functions
         /// <summary>
         /// 
@@ -495,9 +583,9 @@ namespace ThreeDee
             Assert.IsTrue(y + tileHeight <= TileCountY);
         }
         #endregion
-
-
-#region Editor
+        
+        
+        #region Editor
 #if UNITY_EDITOR
         /// <summary>
         /// Validates the inspector input.

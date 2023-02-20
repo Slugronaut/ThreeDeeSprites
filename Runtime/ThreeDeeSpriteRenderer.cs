@@ -26,11 +26,8 @@ namespace ThreeDee
                     _TileResolution = value;
                     if (SpriteHandle >= 0)
                     {
-                        if (ThreeDeeSurfaceChain.Instance != null)
-                        {
-                            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle);
-                            (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, ChainHandle);
-                        }
+                        ReleaseSprite();
+                        AllocateSprite();
                     }
                     SpriteBillboardScale = TileResolution / PrerenderScale;
                     AlignBillboard();
@@ -200,8 +197,11 @@ namespace ThreeDee
                         this.TileResolution,
                         this.PrerenderScale,
                         TileOffset,
+                        Vector3.zero,
                         ModelTrans,
-                        ChainHandle)
+                        null,
+                        ChainHandle
+                        )
                     );
             }
         }
@@ -211,13 +211,25 @@ namespace ThreeDee
         /// </summary>
         void AllocateSprite()
         {
-#if UNITY_EDITOR
+            #if UNITY_EDITOR
             if (!Application.isPlaying) return;
-#endif
+            #endif
             if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
                 (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId);
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        void ReleaseSprite()
+        {
+            if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle >= 0)
+                return;
+
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
+            SpriteHandle = -1;
+            ChainHandle = -1;
+        }
 
         /// <summary>
         /// Helper for repositioning the billboard quad based on alignment and scale.

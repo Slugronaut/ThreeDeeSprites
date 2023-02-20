@@ -1,4 +1,4 @@
-using UnityEditor;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Assertions;
 
@@ -20,8 +20,10 @@ namespace ThreeDee
     [ExecuteAlways]
     public class ThreeDeeSurfaceChain : MonoBehaviour
     {
-        public const int MaxSprites = 500; //hardcoded limit. if you change this be sure to change it in the shader too!!
-        public static readonly int ThreeDee_InPlayMode = Shader.PropertyToID(nameof(ThreeDee_InPlayMode));
+        public const int MaxSprites = 500; //this is hardcoded in the shader so if you change this you MUST change the shader too!
+        public readonly static int ThreeDeeProp_InPlayMode = Shader.PropertyToID(nameof(ThreeDeeProp_InPlayMode));
+        public readonly static int ThreeDeeProp_SpriteTransforms = Shader.PropertyToID(nameof(ThreeDeeProp_SpriteTransforms));
+        public static readonly List<Matrix4x4> DynamicSpriteTransforms = new(ThreeDeeSurfaceChain.MaxSprites);
         public static ThreeDeeSurfaceChain Instance { get; private set; }
         public ThreeDeeSpriteSurface[] Surfaces;
 
@@ -29,17 +31,20 @@ namespace ThreeDee
 
         public void Awake()
         {
+
 #if UNITY_EDITOR
             if (!Application.isPlaying)
             {
                 //we need to do this so that in the editor when we are not in playmode
                 //it allows us to see the true position of the 3D model
-                Shader.SetGlobalInt(ThreeDee_InPlayMode, 0);
+                Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 0);
                 return;
             }
 #endif
-
-            Shader.SetGlobalInt(ThreeDee_InPlayMode, 1);
+            DynamicSpriteTransforms.Clear(); //clear just in case we are in the editor and it's having a stacking effect
+            DynamicSpriteTransforms.AddRange(new Matrix4x4[ThreeDeeSurfaceChain.MaxSprites]);
+            Shader.SetGlobalMatrixArray(ThreeDeeProp_SpriteTransforms, DynamicSpriteTransforms);
+            Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 1);
             Instance = this;
         }
 
@@ -48,7 +53,27 @@ namespace ThreeDee
         /// </summary>
         private void OnDestroy()
         {
-            Shader.SetGlobalInt(ThreeDee_InPlayMode, 0);
+            //this is mostly for the sake of the editor, we need to be sure we
+            //return to normal world-space rendering once playmode has ended.
+            Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 0);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void UpdateSpriteTransformsInShader()
+        {
+            Shader.SetGlobalMatrixArray(ThreeDeeProp_SpriteTransforms, DynamicSpriteTransforms);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="index"></param>
+        /// <param name="spriteTransform"></param>
+        public void PushSpriteTransform(int index, Matrix4x4 spriteTransform)
+        {
+            DynamicSpriteTransforms[index] = spriteTransform;
         }
 
         /// <summary>
@@ -71,11 +96,11 @@ namespace ThreeDee
         /// for the object to continue being rendered.
         /// </summary>
         /// <param name="com"></param>
-        public void AddCommandAdvanced(RenderCommand com)
+        public void AddCommand(RenderCommandDynamic com)
         {
             Assert.IsTrue(com.ChainId >= 0);
             Assert.IsTrue(com.ChainId < Surfaces.Length);
-            Surfaces[com.ChainId].AddDynamicCommand(com);
+            Surfaces[com.ChainId].AddCommand(com);
         }
 
         /// <summary>
@@ -84,7 +109,7 @@ namespace ThreeDee
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns>The chain id and sprite handles.</returns>
-        public (int chainId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1)
+        public (int chainId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1, bool unparentModel = true)
         {
             Assert.IsTrue(forcedChainId < Surfaces.Length);
 
@@ -93,13 +118,13 @@ namespace ThreeDee
                 //try each surface until one gives a successful handle
                 for(int i = 0; i < Surfaces.Length; i++)
                 {
-                    var handle = Surfaces[i].AllocateNewSprite(spriteRef);
+                    var handle = Surfaces[i].AllocateNewSprite(spriteRef, unparentModel);
                     if (handle >= 0)
                         return (i, handle);
                 }
             }
             else
-                return (forcedChainId, Surfaces[forcedChainId].AllocateNewSprite(spriteRef));
+                return (forcedChainId, Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel));
 
             throw new UnityException("Could not allocate a sprite on any available rendering surfaces in the chain.");
         }
@@ -108,11 +133,11 @@ namespace ThreeDee
         /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
         /// </summary>
         /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, int chainId)
+        public void ReleaseSprite(int handle, int chainId, bool unparentModel = true)
         {
             Assert.IsTrue(chainId >= 0);
             Assert.IsTrue(chainId < Surfaces.Length);
-            Surfaces[chainId].ReleaseSprite(handle);
+            Surfaces[chainId].ReleaseSprite(handle, unparentModel);
 
         }
 
@@ -124,6 +149,32 @@ namespace ThreeDee
             Assert.IsTrue(chainId >= 0);
             Assert.IsTrue(chainId < Surfaces.Length);
             Surfaces[chainId].ReallocateTiles();
+        }
+
+        /// <summary>
+        /// Encodes a single integer into a Vector3.
+        /// </summary>
+        /// <param name="index"></param>
+        /// <returns></returns>
+        public static Vector3 EncodeFloat3(int index)
+        {
+            float x = (float)(index & 1023) / 1023.0f;
+            float y = (float)((index >> 10) & 1023) / 1023.0f;
+            float z = (float)((index >> 20) & 511) / 511.0f;
+            return new Vector3(x, y, z);
+        }
+
+        /// <summary>
+        /// Decodes a Vector3 into a previously encoded integer.
+        /// </summary>
+        /// <param name="float3"></param>
+        /// <returns></returns>
+        public static int DecodeFloat3(Vector3 float3)
+        {
+            int x = (int)(float3.x * 1023);
+            int y = (int)(float3.y * 1023) << 10;
+            int z = (int)(float3.z * 511) << 20;
+            return x | y | z;
         }
     }
 }
