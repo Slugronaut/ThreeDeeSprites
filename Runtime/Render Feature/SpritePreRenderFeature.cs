@@ -12,6 +12,7 @@ namespace ThreeDee
     public class SpritePreRenderFeature : ScriptableRendererFeature
     {
         public RenderPassEvent EventPoint = RenderPassEvent.AfterRenderingOpaques;
+        public LayerMask Layers;
         public SpriteRenderSurface[] Surfaces;
         SpritePreRenderPass Pass;
 
@@ -21,7 +22,7 @@ namespace ThreeDee
         /// </summary>
         public override void Create()
         {
-            Pass = new(Surfaces)
+            Pass = new(Layers.value, Surfaces)
             {
                 renderPassEvent = EventPoint,
             };

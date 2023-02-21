@@ -1,4 +1,5 @@
 ﻿using Sirenix.OdinInspector;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Toolbox.Math;
@@ -93,6 +94,15 @@ namespace ThreeDee
                 }
             }
         }
+
+        [SerializeField]
+        [Required("A material for billboards that render sprites from this surface must be supplied. Be sure to set the texture of that material to this surface's render texture!")]
+        [Tooltip("The material that will be assigned to any billboard sprite who's model is pre-rendered to this surface. The material must supply a texture that references this surface's render texture.")]
+        Material _BillboardMaterial;
+        public Material BillboardMaterial
+        {
+            get => _BillboardMaterial;
+        }
         
         #endregion
 
@@ -104,12 +114,11 @@ namespace ThreeDee
         int TileCountY;
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
 
-        public static readonly int MainTexId = Shader.PropertyToID("_MainTex"); //used to access the texture of the RenderTarget
+        //public static readonly int MainTexId = Shader.PropertyToID("_MainTex"); //used to access the texture of the RenderTarget
         List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
         readonly Dictionary<int, RegisteredSprite> Sprites = new();
         readonly List<RenderCommand> StaticCommands = new(100);
         readonly List<RenderCommandDynamic> DynamicCommands = new(100);
-
         float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
 
         #endregion
@@ -172,22 +181,9 @@ namespace ThreeDee
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="pos"></param>
-        /// <param name="rotation"></param>
-        public static void DrawDebugAxis(Vector3 pos, Quaternion rotation)
-        {
-            Debug.DrawRay(pos, rotation * Vector3.forward, Color.blue);
-            Debug.DrawRay(pos, rotation * Vector3.up, Color.green);
-            Debug.DrawRay(pos, rotation * Vector3.right, Color.red);
-            Debug.DrawLine(Vector3.zero, pos);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
         public void RenderDynamic()
         {
-            Debug.Log("Rendering...");
+            throw new UnityException("Not yet implemented");
             if (_PrerenderCamera == null) return;
             var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
 
@@ -222,6 +218,7 @@ namespace ThreeDee
         /// </summary>
         public void RenderSingleDynamic()
         {
+            throw new UnityException("IMplemented for testing purposes only. Will be removed in the future.");
             if (PrerenderCamera == null) return;
             _PrerenderCamera.orthographicSize = CameraRatio;
 
@@ -311,11 +308,6 @@ namespace ThreeDee
                         spriteRef.ModelTrans.SetParent(null);
                     }
                 }
-                else
-                {
-                    //if we aren't unparenting then its assumed this is a dynamic sprite. disable the renderer instead
-                    spriteRef.ModelTrans.gameObject.SetActive(false);
-                }
 
                 Sprites.Add(handle, sprite);
 
@@ -339,12 +331,29 @@ namespace ThreeDee
             var tds = Sprites[handle].Ref;
             if (unparentModel)
             {
-                if (tds.isActiveAndEnabled && tds.ModelTrans != null)
-                    tds.ModelTrans.SetParent(Sprites[handle].OriginalParent);
+                //we have to delay this by exactly one frame now that unity doesn't allow
+                //reparenting during the frame that something is enabled/disabled. We'll
+                //use a couroutine to do this. Shouldn't cause *too* much garbage I hope
+                StartCoroutine(DelayedReparent(tds.ModelTrans, Sprites[handle].OriginalParent));
             }
             
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="child"></param>
+        /// <param name="parent"></param>
+        /// <returns></returns>
+        IEnumerator DelayedReparent(Transform child, Transform parent)
+        {
+            Assert.IsNotNull(child);
+            Assert.IsNotNull(parent);
+            yield return null;
+            child.SetParent(parent, false);
+            child.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
         }
 
         /// <summary>

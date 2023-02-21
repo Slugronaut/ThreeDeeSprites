@@ -34,6 +34,13 @@ namespace ThreeDee
         public ViewModes Mode;
 
 
+
+        private void Start()
+        {
+            if (Viewer == null)
+                Viewer = Camera.main.transform;
+        }
+
         /// <summary>
         /// 
         /// </summary>

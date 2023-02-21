@@ -13,10 +13,9 @@ namespace ThreeDee
         readonly public Vector2 Offset2D;
         readonly public Vector3 Offset3D;
         readonly public Transform ModelRoot;
-        readonly public Renderer[] Renderers;
         readonly public int ChainId;
 
-        public RenderCommand(int spriteHandle, int tileResolution, float spriteScale, Vector2 offset2D, Vector3 offset3D, Transform obj, Renderer[] renderers, int chainId)
+        public RenderCommand(int spriteHandle, int tileResolution, float spriteScale, Vector2 offset2D, Vector3 offset3D, Transform obj, int chainId)
         {
             SpriteHandle = spriteHandle;
             TileResolution = tileResolution;
@@ -24,7 +23,6 @@ namespace ThreeDee
             Offset2D = offset2D;
             Offset3D = offset3D;
             ModelRoot = obj;
-            Renderers = renderers;
             ChainId = chainId;
         }
     }

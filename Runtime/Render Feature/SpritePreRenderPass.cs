@@ -13,12 +13,13 @@ namespace ThreeDee
         SpriteRenderSurface[] Surfaces;
         List<RenderCommandDynamic> Commands;
         Camera PreRenderCamera;
+        int LayerMask;
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="surfaces"></param>
-        public SpritePreRenderPass(SpriteRenderSurface[] surfaces)
+        public SpritePreRenderPass(int LayerMask, SpriteRenderSurface[] surfaces)
         {
             Surfaces = surfaces;
             Commands = new List<RenderCommandDynamic>(100);
@@ -51,10 +52,15 @@ namespace ThreeDee
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             if (renderingData.cameraData.camera != PreRenderCamera) return;
-
+            DrawingSettings ds = new DrawingSettings();
+            FilteringSettings fs = new FilteringSettings(null, LayerMask);
             foreach(var com in Commands)
             {
+                //TODO: we need a way to ONLY render the current command's model and 
+                //ensure it's in the correct position in view for the camera
 
+                //As it is right now this would render everything for each command.... not what we want.
+                context.DrawRenderers(renderingData.cullResults, ref ds, ref fs);
             }
         }
 

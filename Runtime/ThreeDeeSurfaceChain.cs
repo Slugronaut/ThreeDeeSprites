@@ -77,6 +77,20 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// Returns the material associated with the identified surface handle. This material
+        /// is used by sprite billboards to render using the surface's rendertexture.
+        /// </summary>
+        /// <param name="chainId"></param>
+        /// <returns></returns>
+        public Material GetSurfaceBillboardMaterial(int chainId)
+        {
+            Assert.IsNotNull(Surfaces);
+            Assert.IsTrue(chainId > -1);
+            Assert.IsTrue(chainId < Surfaces.Length);
+            return Surfaces[chainId].BillboardMaterial;
+        }
+
+        /// <summary>
         /// Add a render command to the command queue. The command is issued to the appropriate
         /// RenderSurface based on its internal chain id.
         /// </summary>

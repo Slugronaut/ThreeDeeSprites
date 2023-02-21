@@ -9,6 +9,13 @@ namespace ThreeDee
     [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder)]
     public class ThreeDeeSpriteRenderer : MonoBehaviour, IThreeDeeSpriteRenderer
     {
+        //This is used to control if 3D models are unparented from their original source upon being allocated.
+        //If this is set to true the the sprites will only ever have to Issue a new render command if something
+        //fundamentally changes with the ratios or offsets, otherwise the model is effectively where it needs to be forever.
+        //If false, sprites will have to issue a new render command every single frame because they will need to update their
+        //model position temporarily for them to be captured on the surface by the RT camera.
+        public static readonly bool ReparentModel = true;
+
         [SerializeField]
         [HideInInspector]
         int _TileResolution = 1;
@@ -148,7 +155,7 @@ namespace ThreeDee
 
         int SpriteHandle = -1;
         int ChainHandle = -1;
-
+        RenderCommand RenderCmd;
 
 
         private void Start()
@@ -176,9 +183,7 @@ namespace ThreeDee
 
         private void OnDisable()
         {
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle);
-            SpriteHandle = -1;
-            ChainHandle = -1;
+            ReleaseSprite();
         }
 
         /// <summary>
@@ -186,24 +191,27 @@ namespace ThreeDee
         /// </summary>
         void IssueRenderRequest()
         {
-#if UNITY_EDITOR
+            #if UNITY_EDITOR
             if (!Application.isPlaying) return;
-#endif
+            #endif
             if (SpriteHandle >= 0 && ChainHandle >= 0)
-            {
-                ThreeDeeSurfaceChain.Instance.AddCommand(
-                    new RenderCommand(
+                ThreeDeeSurfaceChain.Instance.AddCommand(RenderCmd);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        void GenerateCommand()
+        {
+            RenderCmd = new RenderCommand(
                         this.SpriteHandle,
                         this.TileResolution,
                         this.PrerenderScale,
                         TileOffset,
                         Vector3.zero,
                         ModelTrans,
-                        null,
                         ChainHandle
-                        )
-                    );
-            }
+                        );
         }
 
         /// <summary>
@@ -215,7 +223,11 @@ namespace ThreeDee
             if (!Application.isPlaying) return;
             #endif
             if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId);
+                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, ReparentModel);
+           
+            //rebind our billboard to use the rendertexture from the surface it pre-renders to
+            this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(ChainHandle);
+            GenerateCommand();
         }
 
         /// <summary>
@@ -223,10 +235,10 @@ namespace ThreeDee
         /// </summary>
         void ReleaseSprite()
         {
-            if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle >= 0)
+            if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle < 0)
                 return;
 
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, ReparentModel);
             SpriteHandle = -1;
             ChainHandle = -1;
         }
