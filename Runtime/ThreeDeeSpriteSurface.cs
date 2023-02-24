@@ -103,7 +103,7 @@ namespace ThreeDee
         {
             get => _BillboardMaterial;
         }
-        
+
         #endregion
 
 
@@ -114,12 +114,21 @@ namespace ThreeDee
         int TileCountY;
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
 
-        //public static readonly int MainTexId = Shader.PropertyToID("_MainTex"); //used to access the texture of the RenderTarget
         List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
         readonly Dictionary<int, RegisteredSprite> Sprites = new();
         readonly List<RenderCommand> StaticCommands = new(100);
         readonly List<RenderCommandDynamic> DynamicCommands = new(100);
         float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
+
+        //list of potential texture property names used in shaders
+        //if you have a shader with a different naming convetion, be sure to add it here
+        //of the render texture won't be applied to the billboard correctly.
+        //texture as assigned first-come first-serve. So if one higher on this list is
+        //found, no further checks down the list will be made
+        public static readonly int[] MainTexIds = {
+            Shader.PropertyToID("_MainTex"),
+            Shader.PropertyToID("_BaseMap")
+            };
 
         #endregion
 
@@ -310,9 +319,7 @@ namespace ThreeDee
                 }
 
                 Sprites.Add(handle, sprite);
-
-                //spriteRef.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial.SetTexture(MainTexId, _PrerenderCamera.targetTexture);
-
+                
                 AllocateSpriteTiles(handle, indicies);
                 ApplyTileRectToMesh(rect, spriteRef.SpriteBillboard.mesh);
                 return handle;
@@ -329,7 +336,7 @@ namespace ThreeDee
         public void ReleaseSprite(int handle, bool unparentModel)
         {
             var tds = Sprites[handle].Ref;
-            if (unparentModel)
+            if (unparentModel && !ThreeDeeSurfaceChain.AppQuitting)
             {
                 //we have to delay this by exactly one frame now that unity doesn't allow
                 //reparenting during the frame that something is enabled/disabled. We'll
@@ -383,6 +390,18 @@ namespace ThreeDee
 
             foreach (var handle in removeList)
                 Sprites.Remove(handle);
+        }
+
+        /// <summary>
+        /// Can be used to inject all new materials for pre-rendered sprite billboards as well as the destination texture
+        /// to which this surface is rendered. Mostly here for the purposes of ThreeDeeSurfaceChain's ability to dupe surfaces.
+        /// </summary>
+        /// <param name="billboardMat"></param>
+        /// <param name="renderTexture"></param>
+        public void InjectNewSurfaceSources(Material billboardMat, RenderTexture renderTexture)
+        {
+            this._BillboardMaterial = billboardMat;
+            this._PrerenderCamera.targetTexture = renderTexture;
         }
         #endregion
 

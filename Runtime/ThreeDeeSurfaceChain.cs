@@ -1,4 +1,6 @@
+using Sirenix.OdinInspector;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Assertions;
 
@@ -25,8 +27,20 @@ namespace ThreeDee
         public readonly static int ThreeDeeProp_SpriteTransforms = Shader.PropertyToID(nameof(ThreeDeeProp_SpriteTransforms));
         public static readonly List<Matrix4x4> DynamicSpriteTransforms = new(ThreeDeeSurfaceChain.MaxSprites);
         public static ThreeDeeSurfaceChain Instance { get; private set; }
-        public ThreeDeeSpriteSurface[] Surfaces;
+        public static readonly float DupedSurfaceOffsetDirection = 1;
+        public static readonly float DupedSurfaceOffsetExtra = 1;
+        
+        [SceneObjectsOnly]
+        [Tooltip("A set of pre-configured surfaces that already exist in the scene. These will be used to render sprites to billboards.")]
+        public List<ThreeDeeSpriteSurface> Surfaces;
 
+        [Tooltip("If set, the following surface will be dupelicated any time a sprite allocation is requested and there is no room. The surface duplication is based on the chain id of the sprite allocation. If the id is -1 the first prefab is always used.")]
+        public bool DuplicateOnDemand;
+        [ShowIf("DuplicateOnDemand")]
+        [AssetsOnly]
+        public ThreeDeeSpriteSurface[] SurfacePrefabs;
+
+        public static bool AppQuitting { get; private set; } = false;
 
 
         public void Awake()
@@ -46,6 +60,16 @@ namespace ThreeDee
             Shader.SetGlobalMatrixArray(ThreeDeeProp_SpriteTransforms, DynamicSpriteTransforms);
             Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 1);
             Instance = this;
+
+            Application.quitting += HandleQuitting;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        void HandleQuitting()
+        {
+            AppQuitting = true;
         }
 
         /// <summary>
@@ -86,7 +110,7 @@ namespace ThreeDee
         {
             Assert.IsNotNull(Surfaces);
             Assert.IsTrue(chainId > -1);
-            Assert.IsTrue(chainId < Surfaces.Length);
+            Assert.IsTrue(chainId < Surfaces.Count);
             return Surfaces[chainId].BillboardMaterial;
         }
 
@@ -98,7 +122,7 @@ namespace ThreeDee
         public void AddCommand(RenderCommand com)
         {
             Assert.IsTrue(com.ChainId >= 0);
-            Assert.IsTrue(com.ChainId < Surfaces.Length);
+            Assert.IsTrue(com.ChainId < Surfaces.Count);
             Surfaces[com.ChainId].AddCommand(com);
         }
 
@@ -113,7 +137,7 @@ namespace ThreeDee
         public void AddCommand(RenderCommandDynamic com)
         {
             Assert.IsTrue(com.ChainId >= 0);
-            Assert.IsTrue(com.ChainId < Surfaces.Length);
+            Assert.IsTrue(com.ChainId < Surfaces.Count);
             Surfaces[com.ChainId].AddCommand(com);
         }
 
@@ -125,12 +149,12 @@ namespace ThreeDee
         /// <returns>The chain id and sprite handles.</returns>
         public (int chainId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1, bool unparentModel = true)
         {
-            Assert.IsTrue(forcedChainId < Surfaces.Length);
+            Assert.IsTrue(forcedChainId < Surfaces.Count);
 
-            if(forcedChainId < 0)
+            if (forcedChainId < 0)
             {
                 //try each surface until one gives a successful handle
-                for(int i = 0; i < Surfaces.Length; i++)
+                for (int i = 0; i < Surfaces.Count; i++)
                 {
                     var handle = Surfaces[i].AllocateNewSprite(spriteRef, unparentModel);
                     if (handle >= 0)
@@ -138,9 +162,76 @@ namespace ThreeDee
                 }
             }
             else
-                return (forcedChainId, Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel));
+            {
+                int handle = Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel);
+                if(handle >= 0)
+                    return (forcedChainId, handle);
+            }
+
+            if(DuplicateOnDemand)
+            {
+                Assert.IsNotNull(SurfacePrefabs);
+                Assert.IsTrue(SurfacePrefabs.Length > 0);
+                Assert.IsTrue(forcedChainId < SurfacePrefabs.Length);
+
+                //if surface chain id was -1 (or less), use the first surface
+                ////prefab, otherwise use the prefab given by the chain id
+                forcedChainId = forcedChainId < 0 ? 0 : forcedChainId;
+                Assert.IsNotNull(SurfacePrefabs[forcedChainId]);
+                var dupeSurface = DuplicateSurface(SurfacePrefabs[forcedChainId]);
+
+                if(dupeSurface != null)
+                {
+                    //we've added totally new surface so we'll need to return that chain id
+                    Surfaces.Add(dupeSurface);
+                    forcedChainId = Surfaces.Count - 1; //the new chain id is the max number of surfaces minus one
+
+                    if (forcedChainId > 0)
+                    {
+                        //So... we have more than one surface in the chain already, we need to offset this one
+                        //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
+                        //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
+                        var prevSurface = Surfaces[forcedChainId - 1];
+                        var pos =   prevSurface.transform.position +
+                                    new Vector3(0, 0, DupedSurfaceOffsetDirection * (DupedSurfaceOffsetExtra + prevSurface.PrerenderCamera.farClipPlane));
+                        dupeSurface.transform.position = pos;
+                    }
+                    else dupeSurface.transform.position = Vector3.zero;
+
+
+                    dupeSurface.name = $"Surface ({forcedChainId} - duped)";
+                    dupeSurface.PrerenderCamera.targetTexture.name = $"Surface RT ({forcedChainId} - duped)";
+                    dupeSurface.BillboardMaterial.name = $"Surface Mat ({forcedChainId} - duped)";
+                    dupeSurface.transform.SetParent(this.transform, true);
+                    int handle = Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel);
+                    if (handle >= 0)
+                        return (forcedChainId, handle);
+                }
+            }
 
             throw new UnityException("Could not allocate a sprite on any available rendering surfaces in the chain.");
+        }
+
+        /// <summary>
+        /// Creates a deep copy of the given ThreeDeeSpriteSurface. It is considered 'deep' because it
+        /// also creates a new render target and billboard material based on the ones linked in the source surface.
+        /// </summary>
+        /// <param name="surfacePrefab"></param>
+        /// <returns></returns>
+        ThreeDeeSpriteSurface DuplicateSurface(ThreeDeeSpriteSurface surfacePrefab)
+        {
+            var surface = Instantiate(surfacePrefab);
+            var dupedRT = new RenderTexture(surfacePrefab.PrerenderCamera.targetTexture);
+            dupedRT.filterMode = surfacePrefab.PrerenderCamera.targetTexture.filterMode;
+            var dupedMat = new Material(surfacePrefab.BillboardMaterial);
+
+            foreach (var id in ThreeDeeSpriteSurface.MainTexIds)
+            {
+                if(dupedMat.HasTexture(id))
+                    dupedMat.SetTexture(id, dupedRT);
+            }
+            surface.InjectNewSurfaceSources(dupedMat, dupedRT);
+            return surface;
         }
 
         /// <summary>
@@ -150,7 +241,7 @@ namespace ThreeDee
         public void ReleaseSprite(int handle, int chainId, bool unparentModel = true)
         {
             Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Length);
+            Assert.IsTrue(chainId < Surfaces.Count);
             Surfaces[chainId].ReleaseSprite(handle, unparentModel);
 
         }
@@ -161,7 +252,7 @@ namespace ThreeDee
         public void ReallocateTiles(int chainId)
         {
             Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Length);
+            Assert.IsTrue(chainId < Surfaces.Count);
             Surfaces[chainId].ReallocateTiles();
         }
 
