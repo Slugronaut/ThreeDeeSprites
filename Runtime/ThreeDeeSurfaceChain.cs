@@ -222,7 +222,7 @@ namespace ThreeDee
         {
             var surface = Instantiate(surfacePrefab);
             var dupedRT = new RenderTexture(surfacePrefab.PrerenderCamera.targetTexture);
-            dupedRT.filterMode = surfacePrefab.PrerenderCamera.targetTexture.filterMode;
+            dupedRT.filterMode = surfacePrefab.PrerenderCamera.targetTexture.filterMode; //this isn't being duped properly
             var dupedMat = new Material(surfacePrefab.BillboardMaterial);
 
             foreach (var id in ThreeDeeSpriteSurface.MainTexIds)
