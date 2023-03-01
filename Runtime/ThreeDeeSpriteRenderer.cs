@@ -38,6 +38,7 @@ namespace ThreeDee
                     }
                     SpriteBillboardScale = TileResolution / PrerenderScale;
                     AlignBillboard();
+                    IssueRenderRequest();
                 }
             }
         }
@@ -57,7 +58,7 @@ namespace ThreeDee
                 {
                     _PreRenderScale = value;
                     SpriteBillboardScale = TileResolution / PrerenderScale;
-                    AlignBillboard();
+                    UpdateSpriteImage();
                 }
             }
         }
@@ -96,7 +97,7 @@ namespace ThreeDee
                 if (_TileOffset != value)
                 {
                     _TileOffset = value;
-                    AlignBillboard();
+                    UpdateSpriteImage();
                 }
             }
         }
@@ -115,7 +116,7 @@ namespace ThreeDee
                 if(_BillboardOffset != value)
                 {
                     _BillboardOffset = value;
-                    AlignBillboard();
+                    UpdateSpriteImage();
                 }
             }
         }
@@ -250,7 +251,30 @@ namespace ThreeDee
         void AlignBillboard()
         {
             _SpriteBillboard.transform.localPosition = _BillboardOffset + (new Vector3(0, -_TileOffset.y, 0) * SpriteBillboardScale);
-            IssueRenderRequest();
+        }
+
+        /// <summary>
+        /// Resets the sprite within the render chain to fully update all stats.
+        /// A render request is issued afterwards to update the sprite billboard.
+        /// </summary>
+        void UpdateSpriteImage()
+        {
+            #if UNITY_EDITOR
+            if (!Application.isPlaying) return;
+            #endif
+
+            if (SpriteHandle >= 0 && ThreeDeeSurfaceChain.Instance != null)
+            {
+                //we can't rely on ReleaseSprite() and AllocateSprite here because internally they
+                //may reparent the modelwhich doesn't work in single-frame actions like this.
+                //Instead, we'll have to do it manually.
+                ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
+                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, false);
+                this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(ChainHandle);
+                AlignBillboard();
+                GenerateCommand();
+                IssueRenderRequest();
+            }
         }
     }
 
