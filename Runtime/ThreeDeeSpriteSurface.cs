@@ -20,7 +20,7 @@ namespace ThreeDee
     [DefaultExecutionOrder(ExecutionOrder + 1)]
     public class ThreeDeeSpriteSurface : MonoBehaviour
     {
-        class RegisteredSprite
+        public class RegisteredSprite
         {
             public Rect Rect;
             public int[] AllocatedTiles;
@@ -345,6 +345,16 @@ namespace ThreeDee
             
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
+        }
+
+        /// <summary>
+        /// Given a handle id, returns the internal data used to reference a sprite.
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <returns></returns>
+        public RegisteredSprite QueryInternalSpriteData(int handle)
+        {
+            return Sprites[handle];
         }
 
         /// <summary>

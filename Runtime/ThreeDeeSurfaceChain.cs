@@ -142,6 +142,27 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// Reallocates a sprite using updated info. This method is needed when dynamically resizing sprite resolutions or tile counts
+        /// due to the fact that normal release and allocation requires a single frame to pass in order to perform reparenting of models.
+        /// This method simply transfers to old parent data so everything happens within a single frame.
+        /// </summary>
+        /// <param name="spriteRef"></param>
+        /// <param name="forceChainId"></param>
+        /// <returns></returns>
+        public (int chainId, int spriteHandle) ReallocateSprite(IThreeDeeSpriteRenderer spriteRef, int handle, int chainId, int requestedChainId = -1)
+        {
+            var oldSpriteData = Surfaces[chainId].QueryInternalSpriteData(handle);
+            Assert.IsNotNull(oldSpriteData);
+
+            ReleaseSprite(handle, chainId, false);
+            (chainId, handle) = AllocateNewSprite(spriteRef, requestedChainId, false);
+            var newSpriteData = Surfaces[chainId].QueryInternalSpriteData(handle);
+            newSpriteData.OriginalParent = oldSpriteData.OriginalParent;
+
+            return (chainId, handle);
+        }
+
+        /// <summary>
         /// Allocates a rectangular space on the render target for a sprite of the
         /// desired size squared and returns a handle for that space.
         /// </summary>
@@ -213,6 +234,18 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
+        /// </summary>
+        /// <param name="handle"></param>
+        public void ReleaseSprite(int handle, int chainId, bool unparentModel = true)
+        {
+            Assert.IsTrue(chainId >= 0);
+            Assert.IsTrue(chainId < Surfaces.Count);
+            Surfaces[chainId].ReleaseSprite(handle, unparentModel);
+
+        }
+
+        /// <summary>
         /// Creates a deep copy of the given ThreeDeeSpriteSurface. It is considered 'deep' because it
         /// also creates a new render target and billboard material based on the ones linked in the source surface.
         /// </summary>
@@ -232,18 +265,6 @@ namespace ThreeDee
             }
             surface.InjectNewSurfaceSources(dupedMat, dupedRT);
             return surface;
-        }
-
-        /// <summary>
-        /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
-        /// </summary>
-        /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, int chainId, bool unparentModel = true)
-        {
-            Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReleaseSprite(handle, unparentModel);
-
         }
 
         /// <summary>

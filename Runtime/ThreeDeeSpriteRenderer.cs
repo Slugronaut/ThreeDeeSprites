@@ -265,12 +265,9 @@ namespace ThreeDee
 
             if (SpriteHandle >= 0 && ThreeDeeSurfaceChain.Instance != null)
             {
-                //we can't rely on ReleaseSprite() and AllocateSprite here because internally they
-                //may reparent the modelwhich doesn't work in single-frame actions like this.
-                //Instead, we'll have to do it manually.
-                ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, false);
-                this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(ChainHandle);
+                //we need to use this special reallocation method so that reparenting information is preserved.
+                //normal release/allocation would loose this info and
+                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.ReallocateSprite(this, SpriteHandle, ChainHandle, SurfaceId);
                 AlignBillboard();
                 GenerateCommand();
                 IssueRenderRequest();
