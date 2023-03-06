@@ -115,6 +115,42 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <returns></returns>
+        public Rect QueryTileRect(int chainId, int handle)
+        {
+            Assert.IsTrue(chainId > -1);
+            Assert.IsTrue(chainId <= Surfaces.Count);
+            return Surfaces[chainId].QueryTileRect(handle);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="chainId"></param>
+        /// <returns></returns>
+        public ThreeDeeSpriteSurface QuerySurface(int chainId)
+        {
+            Assert.IsTrue(chainId > -1);
+            Assert.IsTrue(chainId <= Surfaces.Count);
+            return Surfaces[chainId];
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="chainId"></param>
+        /// <returns></returns>
+        public Camera QueryCamera(int chainId)
+        {
+            Assert.IsTrue(chainId > -1);
+            Assert.IsTrue(chainId <= Surfaces.Count);
+            return Surfaces[chainId].QueryCamera();
+        }
+
+        /// <summary>
         /// Add a render command to the command queue. The command is issued to the appropriate
         /// RenderSurface based on its internal chain id.
         /// </summary>

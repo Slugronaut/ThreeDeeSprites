@@ -6,6 +6,7 @@ using Toolbox.Math;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 using Debug = UnityEngine.Debug;
 
 namespace ThreeDee
@@ -108,8 +109,8 @@ namespace ThreeDee
 
 
         #region Private Fields
-        int ScreenWidth;
-        int ScreenHeight;
+        public int ScreenWidth { get; private set; }
+        public int ScreenHeight { get; private set; }
         int TileCountX;
         int TileCountY;
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
@@ -185,6 +186,26 @@ namespace ThreeDee
             StaticCommands.Clear();
             _PrerenderCamera.Render(); //this was causing odd twitches with non-interpolated animations. we'll just leave the camera on and render like normal I guess?
         }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <returns></returns>
+        public Rect QueryTileRect(int handle)
+        {
+            return Sprites[handle].Rect;
+        }
+
+        /// <summary>
+        /// S
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <returns></returns>
+        public Camera QueryCamera()
+        {
+            return _PrerenderCamera;
+        }    
 
         /// <summary>
         /// 

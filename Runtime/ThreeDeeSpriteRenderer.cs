@@ -1,5 +1,6 @@
 using Sirenix.OdinInspector;
 using UnityEngine;
+using UnityEngine.Assertions;
 
 namespace ThreeDee
 {
@@ -154,6 +155,8 @@ namespace ThreeDee
         [Tooltip("This can be used to forceably set the surface id you want this sprite to be created for. Any value less than zero will result in the first surface with available space being used.")]
         public int SurfaceId = -1;
 
+        public bool Allocated { get; private set; }
+
         int SpriteHandle = -1;
         int ChainHandle = -1;
         RenderCommand RenderCmd;
@@ -228,7 +231,9 @@ namespace ThreeDee
            
             //rebind our billboard to use the rendertexture from the surface it pre-renders to
             this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(ChainHandle);
+            AlignBillboard();
             GenerateCommand();
+            Allocated = true;
         }
 
         /// <summary>
@@ -239,6 +244,7 @@ namespace ThreeDee
             if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle < 0)
                 return;
 
+            Allocated = false;
             ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, ReparentModel);
             SpriteHandle = -1;
             ChainHandle = -1;
@@ -272,6 +278,32 @@ namespace ThreeDee
                 GenerateCommand();
                 IssueRenderRequest();
             }
+        }
+
+        /// <summary>
+        /// Returns the rect assigned to this sprite by the surface it is being rendered to.
+        /// </summary>
+        /// <returns></returns>
+        public Rect SurfaceRect()
+        {
+            Assert.IsNotNull(ThreeDeeSurfaceChain.Instance);
+            return ThreeDeeSurfaceChain.Instance.QueryTileRect(ChainHandle, SpriteHandle);
+        }
+
+        /// <summary>
+        /// Returns a worldspace position in relation to the tile rect allocated to the 3D model.
+        /// </summary>
+        /// <returns></returns>
+        public Vector3 GetWorldspaceTileOffset(Vector3 pos)
+        {
+            ThreeDeeSpriteSurface surface = ThreeDeeSurfaceChain.Instance.QuerySurface(ChainHandle);
+
+            float tileScale = surface.TileSize * TileResolution;
+            tileScale /= surface.ScreenHeight;
+            var center = (Vector2)pos + TileOffset * tileScale;
+
+            var cam = ThreeDeeSurfaceChain.Instance.QueryCamera(ChainHandle);
+            return cam.ViewportToWorldPoint(new Vector3(center.x, center.y, pos.z));
         }
     }
 
