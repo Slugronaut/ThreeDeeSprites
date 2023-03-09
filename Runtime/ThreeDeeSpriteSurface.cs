@@ -184,7 +184,7 @@ namespace ThreeDee
 
             //then take a snapshot of all of them in one go
             StaticCommands.Clear();
-            _PrerenderCamera.Render(); //this was causing odd twitches with non-interpolated animations. we'll just leave the camera on and render like normal I guess?
+            //_PrerenderCamera.Render(); //this was causing odd twitches with non-interpolated animations. we'll just leave the camera on and render like normal I guess?
         }
 
         /// <summary>
