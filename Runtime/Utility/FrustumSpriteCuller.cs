@@ -1,4 +1,3 @@
-using Sirenix.OdinInspector;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -13,8 +12,7 @@ namespace ThreeDee
         [Tooltip("A list of GameObjects that will be set to active when this culler is visible in the camera and inactive otherwise.")]
         public List<GameObject> ObjectsToCull;
         public MeshRenderer SpriteBillboardRenderer;
-        public bool UseMainCamera = true;
-        [HideIf("UseMainCamera")]
+        [Tooltip("The camera to cull against. If null, the default main camera is used.")]
         public Camera Cam;
 
 
@@ -32,7 +30,7 @@ namespace ThreeDee
 
         void Start()
         {
-            if (UseMainCamera)
+            if(Cam == null)
                 Cam = Camera.main;
         }
 
@@ -41,10 +39,6 @@ namespace ThreeDee
         /// </summary>
         void Update()
         {
-            //this will not scale well. we'll need a bool flag at some point
-            if (SpriteBillboardRenderer == null ||
-                Cam == null) return;
-
             if(IsVisible(Cam, SpriteBillboardRenderer.bounds))
             {
                 if (LastVisibleState == VisibilityStates.Visible) return;
@@ -55,7 +49,7 @@ namespace ThreeDee
                         if (!go.activeSelf) go.SetActive(true);
                     }
                 }
-                LastVisibleState= VisibilityStates.Visible;
+                LastVisibleState = VisibilityStates.Visible;
             }
             else
             {
@@ -67,7 +61,7 @@ namespace ThreeDee
                         if (go.activeSelf) go.SetActive(false);
                     }
                 }
-                LastVisibleState= VisibilityStates.Invisible;
+                LastVisibleState = VisibilityStates.Invisible;
             }
         }
 

@@ -1,7 +1,7 @@
 using Sirenix.OdinInspector;
-using System.Collections.Generic;
 using UnityEngine;
 
+/*
 namespace ThreeDee
 {
     /// <summary>
@@ -145,11 +145,16 @@ namespace ThreeDee
             }
         }
 
-        [Tooltip("This can be used to forceably set the surface id you want this sprite to be created for. Any value less than zero will result in the first surface with available space being used.")]
-        public int SurfaceId = -1;
+
+        [SerializeField]
+        RendererDescriptorAsset _DescriptorAsset;
+        public RendererDescriptorAsset DescriptorAsset { get => _DescriptorAsset; }
+
+
+        public int LastCommandHandle { get; private set; }
 
         int SpriteHandle = -1;
-        int ChainHandle = -1;
+        int SurfaceHandle = -1;
         RenderCommandDynamic RenderCommand;
 
 
@@ -197,8 +202,13 @@ namespace ThreeDee
 #if UNITY_EDITOR
             if (!Application.isPlaying) return;
 #endif
-            if (SpriteHandle >= 0 && ChainHandle >= 0)
-                ThreeDeeSurfaceChain.Instance.AddCommand(RenderCommand);
+            //if (SpriteHandle >= 0 && SurfaceHandle >= 0)
+            //    LastCommandHandle = ThreeDeeSurfaceChain.Instance.AddCommand(RenderCommand);
+        }
+
+        public void FlagRenderRequestComplete()
+        {
+            LastCommandHandle = -1;
         }
 
         /// <summary>
@@ -213,7 +223,7 @@ namespace ThreeDee
                         TileOffset,
                         Vector3.zero,
                         ModelTrans,
-                        ChainHandle
+                        SurfaceHandle
                         );
         }
 
@@ -226,7 +236,7 @@ namespace ThreeDee
             if (!Application.isPlaying) return;
             #endif
             if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, false);
+                (SurfaceHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this);
 
             GenerateCommand();
         }
@@ -239,9 +249,21 @@ namespace ThreeDee
             if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle >= 0)
                 return;
 
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, false);
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, SurfaceHandle);
             SpriteHandle = -1;
-            ChainHandle = -1;
+            SurfaceHandle = -1;
+        }
+
+        /// <summary>
+        /// This is primarily used by the compacting algorithm when to update sprites
+        /// when they have been shifted to new surfaces.
+        /// </summary>
+        /// <param name="surfaceHandle"></param>
+        /// <param name="spriteHandle"></param>
+        public void UpdateHandles(int surfaceHandle, int spriteHandle)
+        {
+            SpriteHandle = spriteHandle;
+            SurfaceHandle = surfaceHandle;
         }
 
         /// <summary>
@@ -257,3 +279,4 @@ namespace ThreeDee
 
 
 }
+*/

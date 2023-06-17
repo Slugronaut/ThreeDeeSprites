@@ -1,4 +1,5 @@
 using Sirenix.OdinInspector;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.Assertions;
 
@@ -10,13 +11,6 @@ namespace ThreeDee
     [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder)]
     public class ThreeDeeSpriteRenderer : MonoBehaviour, IThreeDeeSpriteRenderer
     {
-        //This is used to control if 3D models are unparented from their original source upon being allocated.
-        //If this is set to true the the sprites will only ever have to Issue a new render command if something
-        //fundamentally changes with the ratios or offsets, otherwise the model is effectively where it needs to be forever.
-        //If false, sprites will have to issue a new render command every single frame because they will need to update their
-        //model position temporarily for them to be captured on the surface by the RT camera.
-        public static readonly bool ReparentModel = true;
-
         [SerializeField]
         [HideInInspector]
         int _TileResolution = 1;
@@ -63,7 +57,7 @@ namespace ThreeDee
                 }
             }
         }
-       
+
         [SerializeField]
         [HideInInspector]
         float _SpriteBillboardScale = 1;
@@ -114,7 +108,7 @@ namespace ThreeDee
             get => _BillboardOffset;
             set
             {
-                if(_BillboardOffset != value)
+                if (_BillboardOffset != value)
                 {
                     _BillboardOffset = value;
                     UpdateSpriteImage();
@@ -152,31 +146,40 @@ namespace ThreeDee
             }
         }
 
-        [Tooltip("This can be used to forceably set the surface id you want this sprite to be created for. Any value less than zero will result in the first surface with available space being used.")]
-        public int SurfaceId = -1;
+        [SerializeField]
+        RendererDescriptorAsset _DescriptorAsset;
+        public RendererDescriptorAsset DescriptorAsset { get => _DescriptorAsset; }
 
         public bool Allocated { get; private set; }
+        public int LastCommandHandle { get; private set; }
 
+
+        bool Started;
         int SpriteHandle = -1;
-        int ChainHandle = -1;
+        int SurfaceHandle = -1;
         RenderCommand RenderCmd;
+        Transform OriginalModelParent;
 
 
+        #region Unity Events
         private void Start()
         {
             //forces billboard to update
             float prs = _PreRenderScale;
             PrerenderScale = 104.375f;
             PrerenderScale = prs;
+            Init();
+            Started = true;
         }
 
         private void OnEnable()
         {
-            //make a one-time request for our section of the render texture.
-            //this only needs to be done again if we reallocate the sprite
-            //We need to add a delay of at least 1 frame or the surface's command
-            //buffer may be wiped before we ever process it
-            Invoke(nameof(Init), 0.05f);
+            //Unity can be a real stupid piece of shit sometimes we we have to write bullshit like this now and then...
+            //mostly due to race conditions and the fact that we can't enable things at certain times anymore. they
+            //use 'backwards compatibility' all of the time to avoid fixing stuff and then go and break shit like this
+            //anway. whatever.
+            if (!Started) return;
+            Init();
         }
 
         private void Init()
@@ -188,20 +191,20 @@ namespace ThreeDee
         private void OnDisable()
         {
             ReleaseSprite();
+            if(_DescriptorAsset.CompactSpritesOnDisable)
+                ThreeDeeSurfaceChain.Instance.CompactSprites();
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        void IssueRenderRequest()
+        private void OnDestroy()
         {
-            #if UNITY_EDITOR
-            if (!Application.isPlaying) return;
-            #endif
-            if (SpriteHandle >= 0 && ChainHandle >= 0)
-                ThreeDeeSurfaceChain.Instance.AddCommand(RenderCmd);
+            if(DescriptorAsset.ModelParentMode == RendererDescriptorAsset.ModelParentModes.UnparentOnly &&
+               !ThreeDeeSurfaceChain.AppQuitting)
+                Destroy(ModelTrans.gameObject);
         }
+        #endregion
 
+
+        #region Private Methods
         /// <summary>
         /// 
         /// </summary>
@@ -214,7 +217,7 @@ namespace ThreeDee
                         TileOffset,
                         Vector3.zero,
                         ModelTrans,
-                        ChainHandle
+                        SurfaceHandle
                         );
         }
 
@@ -227,13 +230,16 @@ namespace ThreeDee
             if (!Application.isPlaying) return;
             #endif
             if (ThreeDeeSurfaceChain.Instance != null && SpriteHandle < 0)
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this, SurfaceId, ReparentModel);
-           
-            //rebind our billboard to use the rendertexture from the surface it pre-renders to
-            this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(ChainHandle);
-            AlignBillboard();
-            GenerateCommand();
-            Allocated = true;
+            {
+                (SurfaceHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.AllocateNewSprite(this);
+
+                //rebind our billboard to use the rendertexture from the surface it pre-renders to
+                this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = ThreeDeeSurfaceChain.Instance.GetSurfaceBillboardMaterial(SurfaceHandle);
+                AlignBillboard();
+                GenerateCommand();
+                Allocated = true;
+            }
+            else Debug.LogError("No ThreeDeeSurfaceChain found in the scene. Cannot allocate sprite.");
         }
 
         /// <summary>
@@ -245,14 +251,14 @@ namespace ThreeDee
                 return;
 
             Allocated = false;
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, ChainHandle, ReparentModel);
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, SurfaceHandle);
             SpriteHandle = -1;
-            ChainHandle = -1;
+            SurfaceHandle = -1;
         }
 
         /// <summary>
         /// Helper for repositioning the billboard quad based on alignment and scale.
-        /// Currently only supports Center, TopCenter, ad BottomCenter.
+        /// Currently only supports Center, TopCenter, and BottomCenter.
         /// </summary>
         void AlignBillboard()
         {
@@ -273,13 +279,16 @@ namespace ThreeDee
             {
                 //we need to use this special reallocation method so that reparenting information is preserved.
                 //normal release/allocation would loose this info and
-                (ChainHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.ReallocateSprite(this, SpriteHandle, ChainHandle, SurfaceId);
+                (SurfaceHandle, SpriteHandle) = ThreeDeeSurfaceChain.Instance.ReallocateSprite(this, SpriteHandle, SurfaceHandle);
                 AlignBillboard();
                 GenerateCommand();
                 IssueRenderRequest();
             }
         }
+        #endregion
 
+
+        #region Public Methods
         /// <summary>
         /// Returns the rect assigned to this sprite by the surface it is being rendered to.
         /// </summary>
@@ -287,7 +296,7 @@ namespace ThreeDee
         public Rect SurfaceRect()
         {
             Assert.IsNotNull(ThreeDeeSurfaceChain.Instance);
-            return ThreeDeeSurfaceChain.Instance.QueryTileRect(ChainHandle, SpriteHandle);
+            return ThreeDeeSurfaceChain.Instance.QueryTileRect(SurfaceHandle, SpriteHandle);
         }
 
         /// <summary>
@@ -296,15 +305,136 @@ namespace ThreeDee
         /// <returns></returns>
         public Vector3 GetWorldspaceTileOffset(Vector3 pos)
         {
-            ThreeDeeSpriteSurface surface = ThreeDeeSurfaceChain.Instance.QuerySurface(ChainHandle);
+            ThreeDeeSpriteSurface surface = ThreeDeeSurfaceChain.Instance.QuerySurface(SurfaceHandle);
 
             float tileScale = surface.TileSize * TileResolution;
             tileScale /= surface.ScreenHeight;
             var center = (Vector2)pos + TileOffset * tileScale;
 
-            var cam = ThreeDeeSurfaceChain.Instance.QueryCamera(ChainHandle);
+            var cam = ThreeDeeSurfaceChain.Instance.QueryCamera(SurfaceHandle);
             return cam.ViewportToWorldPoint(new Vector3(center.x, center.y, pos.z));
         }
+
+        /// <summary>
+        /// This is primarily used by the compacting algorithm when to update sprites
+        /// when they have been shifted to new surfaces.
+        /// </summary>
+        /// <param name="surfaceHandle"></param>
+        /// <param name="spriteHandle"></param>
+        public void UpdateHandles(int surfaceHandle, int spriteHandle, Material surfaceMaterial)
+        {
+            SpriteHandle = spriteHandle;
+            SurfaceHandle = surfaceHandle;
+            this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = surfaceMaterial;
+            Allocated = spriteHandle >= 0;
+            //AlignBillboard();
+            GenerateCommand();
+            IssueRenderRequest();
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void IssueRenderRequest()
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying) return;
+#endif
+            if (SpriteHandle >= 0 && SurfaceHandle >= 0)
+                LastCommandHandle = ThreeDeeSurfaceChain.Instance.AddCommand(RenderCmd);
+        }
+
+        /// <summary>
+        /// This can be called when a previously issued render request has been completed.
+        /// Not strictly necessary but useful.
+        /// </summary>
+        public void FlagRenderRequestComplete()
+        {
+            LastCommandHandle = -1;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="allocating"></param>
+        public void ProcessModelParenting(bool allocating)
+        {
+           
+            #region Enabling / Allocating
+            if (allocating)
+            {
+                switch (DescriptorAsset.ModelParentMode)
+                {
+                    case RendererDescriptorAsset.ModelParentModes.UnparentReparent:
+                        {
+                            if (ModelTrans != null && ModelTrans.parent != null)
+                            {
+                                OriginalModelParent = ModelTrans.parent;
+                                ModelTrans.SetParent(null);
+                            }
+                            break;
+                        }
+                    case RendererDescriptorAsset.ModelParentModes.UnparentOnly:
+                        {
+                            if(ModelTrans != null && ModelTrans.parent != null)
+                            {
+                                OriginalModelParent = ModelTrans.parent;
+                                ModelTrans.SetParent(null);
+                            }
+                            break;
+                        }
+                    default:
+                        {
+                            break;
+                        }
+                }
+            }
+            #endregion
+
+            #region Disabling / Deallocating
+            else
+            {
+                switch (DescriptorAsset.ModelParentMode)
+                {
+                    case RendererDescriptorAsset.ModelParentModes.UnparentReparent:
+                        {
+                            if (!ThreeDeeSurfaceChain.AppQuitting)
+                            {
+                                //we have to delay this by exactly one frame now that unity doesn't allow
+                                //reparenting during the frame that something is enabled/disabled. We'll
+                                //use a couroutine to do this. Shouldn't cause *too* much garbage I hope
+                                StartCoroutine(DelayedReparent(ModelTrans, OriginalModelParent));
+                            }
+                            break;
+                        }
+                    default:
+                        {
+                            break;
+                        }
+                }
+            }
+            #endregion
+
+
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="child"></param>
+        /// <param name="parent"></param>
+        /// <returns></returns>
+        IEnumerator DelayedReparent(Transform child, Transform parent)
+        {
+            Assert.IsNotNull(child);
+            Assert.IsNotNull(parent);
+            yield return null;
+            //it's possible for this thing to have been destroyed since this coroutine was started so check for that here
+            if (child == null || parent == null) yield break;
+            child.SetParent(parent, false);
+            child.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+        }
+        #endregion
     }
 
 

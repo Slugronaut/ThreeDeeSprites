@@ -11,7 +11,7 @@ namespace ThreeDee
     public class SpritePreRenderPass : ScriptableRenderPass
     {
         SpriteRenderSurface[] Surfaces;
-        List<RenderCommandDynamic> Commands;
+        List<RenderCommand> Commands;
         Camera PreRenderCamera;
         int LayerMask;
 
@@ -22,7 +22,7 @@ namespace ThreeDee
         public SpritePreRenderPass(int LayerMask, SpriteRenderSurface[] surfaces)
         {
             Surfaces = surfaces;
-            Commands = new List<RenderCommandDynamic>(100);
+            Commands = new List<RenderCommand>(100);
             PreRenderCamera = GameObject.FindAnyObjectByType<SurfaceRenderCamera>().GetComponent<Camera>();
         }
 
@@ -30,7 +30,7 @@ namespace ThreeDee
         /// 
         /// </summary>
         /// <param name="com"></param>
-        public void SumbitDraw(RenderCommandDynamic com)
+        public void SumbitDraw(RenderCommand com)
         {
             Commands.Add(com);
         }
@@ -68,6 +68,5 @@ namespace ThreeDee
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
         }
-
     }
 }

@@ -9,7 +9,12 @@ namespace ThreeDee
     {
         Transform ModelTrans { get; }
         MeshFilter SpriteBillboard { get; set; }
+        RendererDescriptorAsset DescriptorAsset { get; }
         int TileResolution { get; set; }
+        int LastCommandHandle { get; }
         bool isActiveAndEnabled { get; }
+        void UpdateHandles(int surfaceHandle, int spriteHandle, Material surfaceMaterial);
+        void FlagRenderRequestComplete();
+        void ProcessModelParenting(bool allocating);
     }
 }

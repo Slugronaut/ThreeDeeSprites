@@ -1,3 +1,4 @@
+using Codice.Client.BaseCommands.Update.Transformers;
 using UnityEngine;
 
 namespace ThreeDee
@@ -15,7 +16,7 @@ namespace ThreeDee
             Full3D,
         }
 
-        public static readonly float YawAngleSnap = 30;
+        public static readonly float YawAngleSnap = 45;
         public static readonly float PitchAngleSnap = 15;
 
         [Tooltip("The transform that will be rotated.")]
@@ -47,7 +48,7 @@ namespace ThreeDee
         void Update()
         {
             if (Mode == ViewModes.Upright)
-                Target.eulerAngles = QuantizedBillboardRoationRelative(YawAngleSnap, Observed.position, Observed.forward, Viewer.position, ViewerOffset);
+                Target.eulerAngles = QuantizedBillboardRotationRelative(YawAngleSnap, Observed.position, Observed.forward, Viewer.position, ViewerOffset, Viewer.forward);
             else RotateObjectTowardsTargets(Viewer, Observed, Target);
         }
 
@@ -55,9 +56,10 @@ namespace ThreeDee
         /// Returns the euler angles for an inverse y-axis rotation.
         /// </summary>
         /// <returns></returns>
-        public static Vector3 QuantizedBillboardRoationRelative(float yawAngleSnap, Vector3 targetPos, Vector3 targetForward, Vector3 viewerPos, Vector3 viewerOffset)
+        public static Vector3 QuantizedBillboardRotationRelative(float yawAngleSnap, Vector3 targetPos, Vector3 targetForward, Vector3 viewerPos, Vector3 viewerOffset, Vector3 viewerForward)
         {
             var dir = (targetPos - (viewerPos + viewerOffset));
+            dir = Vector3.Normalize(dir + viewerForward); //dir is now the halfVector
             var relForward = new Vector2(dir.x, dir.z);
             var observedForward2D = new Vector2(targetForward.x, targetForward.z);
 

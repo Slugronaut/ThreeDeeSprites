@@ -1,6 +1,5 @@
 using Sirenix.OdinInspector;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.Assertions;
 
@@ -13,55 +12,37 @@ namespace ThreeDee
     /// This is necessary due to the fact that there are hardware limits on how big a texture can be
     /// and more than one may be needed to fit all renderable objects that are currently in use.
     /// 
-    /// 
-    /// 
-    /// BUGS:
-    ///     -not properly allocate sprites to next surface in the chain if a previous one is full
-    /// 
     /// </summary>
-    [ExecuteAlways]
+    [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder + ExecutionOffset)]
     public class ThreeDeeSurfaceChain : MonoBehaviour
     {
-        public const int MaxSprites = 500; //this is hardcoded in the shader so if you change this you MUST change the shader too!
-        public readonly static int ThreeDeeProp_InPlayMode = Shader.PropertyToID(nameof(ThreeDeeProp_InPlayMode));
-        public readonly static int ThreeDeeProp_SpriteTransforms = Shader.PropertyToID(nameof(ThreeDeeProp_SpriteTransforms));
-        public static readonly List<Matrix4x4> DynamicSpriteTransforms = new(ThreeDeeSurfaceChain.MaxSprites);
+        //defines the direction and space to offset the surfaces as they are duplicated so that clip planes dont overlap
+        public static readonly float DupedSurfaceOffsetDirection = 1; 
+        public static readonly float DupedSurfaceOffsetMargin = 1;
+
+        public const int ExecutionOffset = 1;
         public static ThreeDeeSurfaceChain Instance { get; private set; }
-        public static readonly float DupedSurfaceOffsetDirection = 1;
-        public static readonly float DupedSurfaceOffsetExtra = 1;
-        
+
+        [InfoBox("Experimental: This feature is not currently working and should remain disabled.", InfoMessageType.Warning)]
+        [Tooltip("When there is not enough room on any currently existing surfaces, should sprites be compacted before creating a new surface?")]
+        public bool CompactSpritesOnAlloc = false;
+
         [SceneObjectsOnly]
         [Tooltip("A set of pre-configured surfaces that already exist in the scene. These will be used to render sprites to billboards.")]
         public List<ThreeDeeSpriteSurface> Surfaces;
 
-        [Tooltip("If set, the following surface will be dupelicated any time a sprite allocation is requested and there is no room. The surface duplication is based on the chain id of the sprite allocation. If the id is -1 the first prefab is always used.")]
-        public bool DuplicateOnDemand;
-        [ShowIf("DuplicateOnDemand")]
-        [AssetsOnly]
-        public ThreeDeeSpriteSurface[] SurfacePrefabs;
-
         public static bool AppQuitting { get; private set; } = false;
 
 
+        #region Unity Events
         public void Awake()
         {
-
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-            {
-                //we need to do this so that in the editor when we are not in playmode
-                //it allows us to see the true position of the 3D model
-                Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 0);
-                return;
-            }
-#endif
-            DynamicSpriteTransforms.Clear(); //clear just in case we are in the editor and it's having a stacking effect
-            DynamicSpriteTransforms.AddRange(new Matrix4x4[ThreeDeeSurfaceChain.MaxSprites]);
-            Shader.SetGlobalMatrixArray(ThreeDeeProp_SpriteTransforms, DynamicSpriteTransforms);
-            Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 1);
+            AppQuitting = false;
             Instance = this;
 
             Application.quitting += HandleQuitting;
+
+            //InvokeRepeating(nameof(CompactSprites), 5, 5);
         }
 
         /// <summary>
@@ -72,34 +53,30 @@ namespace ThreeDee
             AppQuitting = true;
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        private void OnDestroy()
-        {
-            //this is mostly for the sake of the editor, we need to be sure we
-            //return to normal world-space rendering once playmode has ended.
-            Shader.SetGlobalInt(ThreeDeeProp_InPlayMode, 0);
-        }
+        #endregion
 
-        /// <summary>
-        /// 
-        /// </summary>
-        public void UpdateSpriteTransformsInShader()
-        {
-            Shader.SetGlobalMatrixArray(ThreeDeeProp_SpriteTransforms, DynamicSpriteTransforms);
-        }
 
+        public float CompactTimeLimiter = 10;
+        readonly List<IThreeDeeSpriteRenderer> CompactingSpriteList = new(128);
         /// <summary>
-        /// 
+        /// Reallocates all sprites on all surfaces so that earlier surfaces are assigned first.
+        /// This should help compact sprites onto fewer surfaces and allow for disabling of unecessary
+        /// surfaces.
         /// </summary>
-        /// <param name="index"></param>
-        /// <param name="spriteTransform"></param>
-        public void PushSpriteTransform(int index, Matrix4x4 spriteTransform)
+        [Button("Compact Sprites")]
+        public void CompactSprites()
         {
-            DynamicSpriteTransforms[index] = spriteTransform;
-        }
+            foreach(var surface in Surfaces)
+                CompactingSpriteList.AddRange(surface.ReleaseAllForCompacting());
 
+            foreach (var rend in CompactingSpriteList)
+            {
+                (int surfaceHandle, int spriteHandle) = AllocateNewSprite(rend, true);
+                rend.UpdateHandles(surfaceHandle, spriteHandle, GetSurfaceBillboardMaterial(surfaceHandle)); //forces the sprite to update it's internal command and issue a new render request
+            }
+            CompactingSpriteList.Clear();
+        }
+        
         /// <summary>
         /// Returns the material associated with the identified surface handle. This material
         /// is used by sprite billboards to render using the surface's rendertexture.
@@ -155,26 +132,11 @@ namespace ThreeDee
         /// RenderSurface based on its internal chain id.
         /// </summary>
         /// <param name="com"></param>
-        public void AddCommand(RenderCommand com)
+        public int AddCommand(RenderCommand com)
         {
             Assert.IsTrue(com.ChainId >= 0);
             Assert.IsTrue(com.ChainId < Surfaces.Count);
-            Surfaces[com.ChainId].AddCommand(com);
-        }
-
-        /// <summary>
-        /// Add an advanced render command to the command queue. The command is issued to the appropriate
-        /// RenderSurface based on its internal chain id.
-        /// 
-        /// Advanced commands are different from normal ones in that they must be issued every frame in order
-        /// for the object to continue being rendered.
-        /// </summary>
-        /// <param name="com"></param>
-        public void AddCommand(RenderCommandDynamic com)
-        {
-            Assert.IsTrue(com.ChainId >= 0);
-            Assert.IsTrue(com.ChainId < Surfaces.Count);
-            Surfaces[com.ChainId].AddCommand(com);
+            return Surfaces[com.ChainId].AddCommand(com);
         }
 
         /// <summary>
@@ -185,15 +147,13 @@ namespace ThreeDee
         /// <param name="spriteRef"></param>
         /// <param name="forceChainId"></param>
         /// <returns></returns>
-        public (int chainId, int spriteHandle) ReallocateSprite(IThreeDeeSpriteRenderer spriteRef, int handle, int chainId, int requestedChainId = -1)
+        public (int surfaceId, int spriteHandle) ReallocateSprite(IThreeDeeSpriteRenderer spriteRef, int handle, int chainId)
         {
             var oldSpriteData = Surfaces[chainId].QueryInternalSpriteData(handle);
             Assert.IsNotNull(oldSpriteData);
 
-            ReleaseSprite(handle, chainId, false);
-            (chainId, handle) = AllocateNewSprite(spriteRef, requestedChainId, false);
-            var newSpriteData = Surfaces[chainId].QueryInternalSpriteData(handle);
-            newSpriteData.OriginalParent = oldSpriteData.OriginalParent;
+            ReleaseSprite(handle, chainId);
+            (chainId, handle) = AllocateNewSprite(spriteRef);
 
             return (chainId, handle);
         }
@@ -204,80 +164,88 @@ namespace ThreeDee
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns>The chain id and sprite handles.</returns>
-        public (int chainId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, int forcedChainId = -1, bool unparentModel = true)
+        public (int surfaceId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, bool compacting = false)
         {
-            Assert.IsTrue(forcedChainId < Surfaces.Count);
+            var desc = spriteRef.DescriptorAsset;
 
-            if (forcedChainId < 0)
+            switch(desc.SurfaceIDMode)
             {
-                //try each surface until one gives a successful handle
-                for (int i = 0; i < Surfaces.Count; i++)
-                {
-                    var handle = Surfaces[i].AllocateNewSprite(spriteRef, unparentModel);
-                    if (handle >= 0)
-                        return (i, handle);
-                }
-            }
-            else
-            {
-                int handle = Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel);
-                if(handle >= 0)
-                    return (forcedChainId, handle);
-            }
-
-            if(DuplicateOnDemand)
-            {
-                Assert.IsNotNull(SurfacePrefabs);
-                Assert.IsTrue(SurfacePrefabs.Length > 0);
-                Assert.IsTrue(forcedChainId < SurfacePrefabs.Length);
-
-                //if surface chain id was -1 (or less), use the first surface
-                ////prefab, otherwise use the prefab given by the chain id
-                forcedChainId = forcedChainId < 0 ? 0 : forcedChainId;
-                Assert.IsNotNull(SurfacePrefabs[forcedChainId]);
-                var dupeSurface = DuplicateSurface(SurfacePrefabs[forcedChainId]);
-
-                if(dupeSurface != null)
-                {
-                    //we've added totally new surface so we'll need to return that chain id
-                    Surfaces.Add(dupeSurface);
-                    forcedChainId = Surfaces.Count - 1; //the new chain id is the max number of surfaces minus one
-
-                    if (forcedChainId > 0)
+                case RendererDescriptorAsset.SurfaceIdModes.FirstAvailable:
                     {
-                        //So... we have more than one surface in the chain already, we need to offset this one
-                        //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
-                        //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
-                        var prevSurface = Surfaces[forcedChainId - 1];
-                        var pos =   prevSurface.transform.position +
-                                    new Vector3(0, 0, DupedSurfaceOffsetDirection * (DupedSurfaceOffsetExtra + prevSurface.PrerenderCamera.farClipPlane));
-                        dupeSurface.transform.position = pos;
+                        //try each surface until one gives a successful handle
+                        for (int i = 0; i < Surfaces.Count; i++)
+                        {
+                            var handle = Surfaces[i].AllocateNewSprite(spriteRef);
+                            if (handle >= 0)
+                                return (i, handle);
+                        }
+                        break;
                     }
-                    else dupeSurface.transform.position = Vector3.zero;
+                case RendererDescriptorAsset.SurfaceIdModes.FirstMatchingTileSize:
+                    {
+                        throw new System.Exception("Tile size matching not yet implemented.");
+                    }
+            }
 
+            if(CompactSpritesOnAlloc && !compacting)
+                CompactSprites();
 
-                    dupeSurface.name = $"Surface ({forcedChainId} - duped)";
-                    dupeSurface.PrerenderCamera.targetTexture.name = $"Surface RT ({forcedChainId} - duped)";
-                    dupeSurface.BillboardMaterial.name = $"Surface Mat ({forcedChainId} - duped)";
-                    dupeSurface.transform.SetParent(this.transform, true);
-                    int handle = Surfaces[forcedChainId].AllocateNewSprite(spriteRef, unparentModel);
-                    if (handle >= 0)
-                        return (forcedChainId, handle);
-                }
+            int surfaceHandle = CreateNewSurface(desc);
+            if (surfaceHandle >= 0)
+            {
+                int spriteHandle = Surfaces[surfaceHandle].AllocateNewSprite(spriteRef);
+                if (spriteHandle >= 0)
+                    return (surfaceHandle, spriteHandle);
             }
 
             throw new UnityException("Could not allocate a sprite on any available rendering surfaces in the chain.");
         }
 
         /// <summary>
+        /// Helper for creating a new surface by duplicating a render texture asset.
+        /// </summary>
+        /// <returns></returns>
+        int CreateNewSurface(RendererDescriptorAsset desc)
+        {
+            var dupeSurface = DuplicateSurface(desc.SurfacePrefab);
+            if (dupeSurface != null)
+            {
+                //we've added a totally new surface so we'll need to return that chain id
+                Surfaces.Add(dupeSurface);
+                int surfaceHandle = Surfaces.Count - 1; //the new chain id is the max number of surfaces minus one
+
+                if (surfaceHandle > 0)
+                {
+                    //So... we have more than one surface in the chain already, we need to offset this one
+                    //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
+                    //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
+                    var prevSurface = Surfaces[surfaceHandle - 1];
+                    var pos = prevSurface.transform.position +
+                                new Vector3(0, 0, DupedSurfaceOffsetDirection * (DupedSurfaceOffsetMargin + prevSurface.PrerenderCamera.farClipPlane));
+                    dupeSurface.transform.position = pos;
+                }
+                else dupeSurface.transform.position = Vector3.zero;
+
+
+                dupeSurface.name = $"Surface ({surfaceHandle} - duped)";
+                dupeSurface.PrerenderCamera.targetTexture.name = $"Surface RT ({surfaceHandle} - duped)";
+                dupeSurface.BillboardMaterial.name = $"Surface Mat ({surfaceHandle} - duped)";
+                dupeSurface.transform.SetParent(this.transform, true);
+                return surfaceHandle;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
         /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
         /// </summary>
         /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, int chainId, bool unparentModel = true)
+        public void ReleaseSprite(int handle, int chainId)
         {
             Assert.IsTrue(chainId >= 0);
             Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReleaseSprite(handle, unparentModel);
+            Surfaces[chainId].ReleaseSprite(handle);
 
         }
 

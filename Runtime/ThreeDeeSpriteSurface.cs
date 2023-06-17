@@ -2,11 +2,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Toolbox.Math;
 using UnityEngine;
 using UnityEngine.Assertions;
-using UnityEngine.Rendering;
-using UnityEngine.UIElements;
 using Debug = UnityEngine.Debug;
 
 namespace ThreeDee
@@ -18,23 +15,24 @@ namespace ThreeDee
     /// to manage a series of these surfaces and forward commands to them.
     /// 
     /// </summary>
-    [DefaultExecutionOrder(ExecutionOrder + 1)]
+    [DefaultExecutionOrder(ExecutionOrder + ExecutionOffset)]
     public class ThreeDeeSpriteSurface : MonoBehaviour
     {
         public class RegisteredSprite
         {
             public Rect Rect;
             public int[] AllocatedTiles;
-            public IThreeDeeSpriteRenderer Ref;
-            public Transform OriginalParent;
+            public IThreeDeeSpriteRenderer Rend;
         }
 
 
         #region Public Fields
         public const int ExecutionOrder = 1000;
+        public const int ExecutionOffset = 2;
 
 #if UNITY_EDITOR
         public bool DebugMode;
+        public bool ConsoleLogEvents;
 #endif
 
         [SerializeField]
@@ -117,13 +115,12 @@ namespace ThreeDee
 
         List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
         readonly Dictionary<int, RegisteredSprite> Sprites = new();
-        readonly List<RenderCommand> StaticCommands = new(100);
-        readonly List<RenderCommandDynamic> DynamicCommands = new(100);
+        readonly List<RenderCommand> RenderCommands = new(128);
         float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
 
         //list of potential texture property names used in shaders
         //if you have a shader with a different naming convetion, be sure to add it here
-        //of the render texture won't be applied to the billboard correctly.
+        //or the render texture won't be applied to the billboard correctly.
         //texture as assigned first-come first-serve. So if one higher on this list is
         //found, no further checks down the list will be made
         public static readonly int[] MainTexIds = {
@@ -140,7 +137,6 @@ namespace ThreeDee
         /// </summary>
         private void Awake()
         {
-            DynamicCommands.Clear();
             CreateTileMap(_TileSize);
         }
 
@@ -149,42 +145,113 @@ namespace ThreeDee
         /// </summary>
         void LateUpdate()
         {
+            if (PrerenderCamera.enabled)
+            {
+                if (Sprites.Count < 1)
+                {
+                    PrerenderCamera.enabled = false;
+#if UNITY_EDITOR
+                    if (ConsoleLogEvents)
+                        Debug.Log($"DISABLED Prerender Cam #{this.gameObject.name}");
+#endif
+                }
+            }
+            else if (Sprites.Count > 0)
+            {
+                PrerenderCamera.enabled = true;
+
+#if UNITY_EDITOR
+                if (ConsoleLogEvents)
+                    Debug.Log($"ACTIVATED Prerender Cam #{this.gameObject.name}");
+#endif
+            }
+
+
+            if (!PrerenderCamera.enabled)
+                return;
+
 #if UNITY_EDITOR
             if (DebugMode)
                 DrawTiles();
 #endif
 
-            RenderStatic();
-            //RenderDynamic();
+            ProcessRenderCommands();
         }
         #endregion
 
 
         #region Public Functions
+        readonly List<IThreeDeeSpriteRenderer> CompactingList = new(128);
+        /// <summary>
+        /// Releases all sprites and returns references to them so that they can be re-allocated by a compacting algorithm.
+        /// </summary>
+        /// <returns></returns>
+        public List<IThreeDeeSpriteRenderer> ReleaseAllForCompacting()
+        {
+            CompactingList.Clear();
+            foreach (var kvp in Sprites)
+            {
+                var handle = kvp.Key;
+                var rend = kvp.Value.Rend;
+                CompactingList.Add(rend);
+
+                //mimic releasing of sprite. note that we can't simply call 'ReleaseSprite' here because
+                //it would modify the dictionary we are currently iterating over.
+                #region Excerpt From ReleaseSprite()
+                if (!ThreeDeeSurfaceChain.AppQuitting && rend.ModelTrans.gameObject.activeSelf)
+                    rend.ModelTrans.gameObject.SetActive(false);
+
+                if (rend.LastCommandHandle >= 0 && RenderCommands.Count > 0)
+                {
+                    CancelCommand(rend.LastCommandHandle);
+                    rend.FlagRenderRequestComplete();
+                }
+                rend.ProcessModelParenting(false);
+                ReleaseSpriteTiles(handle);
+                #endregion
+            }
+
+            //sprites are no longer needed so we can now clear out the dictionary refs to them
+            Sprites.Clear();
+            return CompactingList;
+        }
+
+        /// <summary>
+        /// Helper for positiong the transform of a gameobject within its designated tile for the pre-render camera.
+        /// </summary>
+        /// <param name="com"></param>
+        void PositionModelTransformForPrerender(float clipRangeMidpoint, RenderCommand com)
+        {
+            if (com.SpriteHandle < 0) return;
+            float tileScale = _TileSize * com.TileResolution;
+            tileScale /= ScreenHeight;
+            var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
+
+            com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+            com.ModelRoot.SetGlobalScale(Vector3.one * com.SpriteScale);
+        }
+
         /// <summary>
         /// Renders allocated sprites to the surface's associated camera. Static sprites are left as is and
         /// are assumed to have been positioned ahead of time. Dynamic sprites have their position information
         /// uploaded to the global pre-render shader so that they can remain in world-space while
         /// </summary>
-        public void RenderStatic()
+        public void ProcessRenderCommands()
         {
             if (PrerenderCamera == null) return;
             var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
 
-            //position all of the static models
-            foreach (var com in StaticCommands)
+            //position all of the static models for the camera snapshot
+            var commands = RenderCommands;
+            for(int i = 0; i < commands.Count; i++)
             {
-                if (com.SpriteHandle < 0) continue;
-                float tileScale = _TileSize * com.TileResolution;
-                tileScale /= ScreenHeight;
-                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
-                com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
-                com.ModelRoot.transform.SetGlobalScale(Vector3.one * com.SpriteScale);
+                var com = commands[i];
+                if(com.SpriteHandle < 0) continue; //a negative value here means we canceled this request. we can't simply remove it though because the handles are indices tot he array
+                PositionModelTransformForPrerender(clipRangeMidpoint, com);
+                Sprites[com.SpriteHandle].Rend.FlagRenderRequestComplete();
             }
 
-            //then take a snapshot of all of them in one go
-            StaticCommands.Clear();
-            //_PrerenderCamera.Render(); //this was causing odd twitches with non-interpolated animations. we'll just leave the camera on and render like normal I guess?
+            RenderCommands.Clear();
         }
 
         /// <summary>
@@ -205,109 +272,28 @@ namespace ThreeDee
         public Camera QueryCamera()
         {
             return _PrerenderCamera;
-        }    
-
-        /// <summary>
-        /// 
-        /// </summary>
-        public void RenderDynamic()
-        {
-            throw new UnityException("Not yet implemented");
-            if (_PrerenderCamera == null) return;
-            var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
-
-
-            //position the camera for each dynamic model, then take a snapshot at each position
-            foreach (var com in DynamicCommands)
-            {
-                if (com.SpriteHandle < 0) continue;
-
-                com.ModelRoot.gameObject.SetActive(true);
-                float tileScale = _TileSize * com.TileResolution;
-                tileScale /= ScreenHeight;
-                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
-                var objOffsetPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
-                var objScale = Vector3.one * com.SpriteScale;
-
-
-                com.ModelRoot.position = objOffsetPos;
-                com.ModelRoot.transform.SetGlobalScale(objScale);
-
-                var renderers = com.ModelRoot.GetComponentsInChildren<Renderer>();
-                foreach (var renderer in renderers)
-                {
-                }
-            }
-            
-            DynamicCommands.Clear();
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        public void RenderSingleDynamic()
-        {
-            throw new UnityException("IMplemented for testing purposes only. Will be removed in the future.");
-            if (PrerenderCamera == null) return;
-            _PrerenderCamera.orthographicSize = CameraRatio;
-
-            var camTrans = _PrerenderCamera.transform;
-            var originalCamPosition = camTrans.position;
-            var originalCamRotation = camTrans.rotation;
-            var clipRangeMidpoint = (PrerenderCamera.farClipPlane - PrerenderCamera.nearClipPlane) * 0.5f;
-
-
-            //position the camera for each dynamic model, then take a snapshot at each position
-            foreach (var com in DynamicCommands)
-            {
-                if (com.SpriteHandle < 0) continue;
-
-                com.ModelRoot.gameObject.SetActive(true);
-                float tileScale = _TileSize * com.TileResolution;
-                tileScale /= ScreenHeight;
-                var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
-                var objOffsetPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
-                var objScale = Vector3.one * com.SpriteScale;
-
-
-                //rotate the pre-rendercamera based on position between model and player, then offset the camera in aim-space
-                //to ensure the model will be rendered within the assigned rect of the render texture.
-                Camera realCam = Camera.main;
-                //OLD TEST CODE
-                var camEuler = CameraRelativeFacing.QuantizedBillboardRotation(
-                                                            CameraRelativeFacing.YawAngleSnap,
-                                                            com.ModelRoot.position, 
-                                                            realCam.transform.position);
-                var camForward = Quaternion.Euler(camEuler) * Vector3.forward;
-                var camPos = MathUtils.ForwardSpaceOffset(com.ModelRoot.position, camForward, -objOffsetPos);
-
-                com.ModelRoot.transform.SetGlobalScale(objScale);
-                camTrans.eulerAngles = camEuler;
-                camTrans.position = camPos;
-                _PrerenderCamera.RenderDontRestore();
-            }
-
-            //OLD TEST CODE
-            camTrans.SetPositionAndRotation(originalCamPosition, originalCamRotation);
-            DynamicCommands.Clear();
         }
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="com"></param>
-        public void AddCommand(RenderCommand com)
+        public int AddCommand(RenderCommand com)
         {
-            this.StaticCommands.Add(com);
+            RenderCommands.Add(com);
+            return RenderCommands.Count - 1;
         }
 
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="com"></param>
-        public void AddCommand(RenderCommandDynamic com)
+        /// <param name="handle"></param>
+        public void CancelCommand(int handle)
         {
-            this.DynamicCommands.Add(com);
+            //we can't remove the command since others have handles that are also indices.
+            //so instead we'll set this to a default 'cancel' cmd so that it is ignored on
+            //the next render pass.
+            RenderCommands[handle] = RenderCommand.CancelCmd;
         }
 
         /// <summary>
@@ -315,9 +301,9 @@ namespace ThreeDee
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns></returns>
-        public int AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, bool unparentModel)
+        public int AllocateNewSprite(IThreeDeeSpriteRenderer rend)
         {
-            var (success, rect, indicies) = FindAvailableSpace(spriteRef.TileResolution);
+            var (success, rect, indicies) = FindAvailableSpace(rend.TileResolution);
             if (success)
             {
                 int handle = Uids++;
@@ -326,22 +312,17 @@ namespace ThreeDee
                 {
                     AllocatedTiles = indicies,
                     Rect = rect,
-                    Ref = spriteRef,
+                    Rend = rend,
                 };
 
-                if (unparentModel)
-                {
-                    if (spriteRef.ModelTrans != null)
-                    {
-                        sprite.OriginalParent = spriteRef.ModelTrans.parent;
-                        spriteRef.ModelTrans.SetParent(null);
-                    }
-                }
+                if (!rend.ModelTrans.gameObject.activeSelf)
+                    rend.ModelTrans.gameObject.SetActive(true);
 
+                rend.ProcessModelParenting(true);
                 Sprites.Add(handle, sprite);
                 
                 AllocateSpriteTiles(handle, indicies);
-                ApplyTileRectToMesh(rect, spriteRef.SpriteBillboard.mesh);
+                ApplyTileRectToMesh(rect, rend.SpriteBillboard.mesh);
                 return handle;
             }
 
@@ -353,16 +334,19 @@ namespace ThreeDee
         /// 
         /// </summary>
         /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, bool unparentModel)
+        public void ReleaseSprite(int handle)
         {
-            var tds = Sprites[handle].Ref;
-            if (unparentModel && !ThreeDeeSurfaceChain.AppQuitting)
+            var rend = Sprites[handle].Rend;
+            if (!ThreeDeeSurfaceChain.AppQuitting && rend.ModelTrans.gameObject.activeSelf)
+                rend.ModelTrans.gameObject.SetActive(false);
+
+            if (rend.LastCommandHandle >= 0 && RenderCommands.Count > 0)
             {
-                //we have to delay this by exactly one frame now that unity doesn't allow
-                //reparenting during the frame that something is enabled/disabled. We'll
-                //use a couroutine to do this. Shouldn't cause *too* much garbage I hope
-                StartCoroutine(DelayedReparent(tds.ModelTrans, Sprites[handle].OriginalParent));
+                CancelCommand(rend.LastCommandHandle);
+                rend.FlagRenderRequestComplete();
             }
+
+            rend.ProcessModelParenting(false);
             
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
@@ -379,21 +363,6 @@ namespace ThreeDee
         }
 
         /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="child"></param>
-        /// <param name="parent"></param>
-        /// <returns></returns>
-        IEnumerator DelayedReparent(Transform child, Transform parent)
-        {
-            Assert.IsNotNull(child);
-            Assert.IsNotNull(parent);
-            yield return null;
-            child.SetParent(parent, false);
-            child.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
-        }
-
-        /// <summary>
         /// Re-allocates all registered sprites. Useful when changing tilemap sizes and scales.
         /// </summary>
         public void ReallocateTiles()
@@ -407,13 +376,13 @@ namespace ThreeDee
             foreach (var kvp in Sprites)
             {
                 var sprite = kvp.Value;
-                var (success, rect, indicies) = FindAvailableSpace(sprite.Ref.TileResolution);
+                var (success, rect, indicies) = FindAvailableSpace(sprite.Rend.TileResolution);
                 if (success)
                 {
                     sprite.AllocatedTiles = indicies;
                     sprite.Rect = rect;
                     AllocateSpriteTiles(kvp.Key, indicies);
-                    ApplyTileRectToMesh(rect, sprite.Ref.SpriteBillboard.mesh);
+                    ApplyTileRectToMesh(rect, sprite.Rend.SpriteBillboard.mesh);
                 }
                 else removeList.Add(kvp.Key);
             }
