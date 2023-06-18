@@ -34,6 +34,11 @@ namespace ThreeDee
         public static bool AppQuitting { get; private set; } = false;
 
 
+        public float CompactTimeLimiter = 5;
+        float LastCompactTime;
+        readonly List<IThreeDeeSpriteRenderer> CompactingSpriteList = new(128);
+
+
         #region Unity Events
         public void Awake()
         {
@@ -56,8 +61,7 @@ namespace ThreeDee
         #endregion
 
 
-        public float CompactTimeLimiter = 10;
-        readonly List<IThreeDeeSpriteRenderer> CompactingSpriteList = new(128);
+        #region Public Methods
         /// <summary>
         /// Reallocates all sprites on all surfaces so that earlier surfaces are assigned first.
         /// This should help compact sprites onto fewer surfaces and allow for disabling of unecessary
@@ -66,6 +70,10 @@ namespace ThreeDee
         [Button("Compact Sprites")]
         public void CompactSprites()
         {
+            if (Time.time - LastCompactTime < CompactTimeLimiter)
+                return;
+            LastCompactTime = Time.time;
+
             foreach(var surface in Surfaces)
                 CompactingSpriteList.AddRange(surface.ReleaseAllForCompacting());
 
@@ -202,6 +210,31 @@ namespace ThreeDee
         }
 
         /// <summary>
+        /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
+        /// </summary>
+        /// <param name="handle"></param>
+        public void ReleaseSprite(int handle, int chainId)
+        {
+            Assert.IsTrue(chainId >= 0);
+            Assert.IsTrue(chainId < Surfaces.Count);
+            Surfaces[chainId].ReleaseSprite(handle);
+
+        }
+        
+        /// <summary>
+        /// Re-allocates all registered sprites. Useful when changing tilemap sizes and scales.
+        /// </summary>
+        public void ReallocateTiles(int chainId)
+        {
+            Assert.IsTrue(chainId >= 0);
+            Assert.IsTrue(chainId < Surfaces.Count);
+            Surfaces[chainId].ReallocateTiles();
+        }
+        #endregion
+
+        
+        #region Private Methods
+        /// <summary>
         /// Helper for creating a new surface by duplicating a render texture asset.
         /// </summary>
         /// <returns></returns>
@@ -238,18 +271,6 @@ namespace ThreeDee
         }
 
         /// <summary>
-        /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
-        /// </summary>
-        /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, int chainId)
-        {
-            Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReleaseSprite(handle);
-
-        }
-
-        /// <summary>
         /// Creates a deep copy of the given ThreeDeeSpriteSurface. It is considered 'deep' because it
         /// also creates a new render target and billboard material based on the ones linked in the source surface.
         /// </summary>
@@ -270,41 +291,6 @@ namespace ThreeDee
             surface.InjectNewSurfaceSources(dupedMat, dupedRT);
             return surface;
         }
-
-        /// <summary>
-        /// Re-allocates all registered sprites. Useful when changing tilemap sizes and scales.
-        /// </summary>
-        public void ReallocateTiles(int chainId)
-        {
-            Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReallocateTiles();
-        }
-
-        /// <summary>
-        /// Encodes a single integer into a Vector3.
-        /// </summary>
-        /// <param name="index"></param>
-        /// <returns></returns>
-        public static Vector3 EncodeFloat3(int index)
-        {
-            float x = (float)(index & 1023) / 1023.0f;
-            float y = (float)((index >> 10) & 1023) / 1023.0f;
-            float z = (float)((index >> 20) & 511) / 511.0f;
-            return new Vector3(x, y, z);
-        }
-
-        /// <summary>
-        /// Decodes a Vector3 into a previously encoded integer.
-        /// </summary>
-        /// <param name="float3"></param>
-        /// <returns></returns>
-        public static int DecodeFloat3(Vector3 float3)
-        {
-            int x = (int)(float3.x * 1023);
-            int y = (int)(float3.y * 1023) << 10;
-            int z = (int)(float3.z * 511) << 20;
-            return x | y | z;
-        }
+        #endregion
     }
 }
