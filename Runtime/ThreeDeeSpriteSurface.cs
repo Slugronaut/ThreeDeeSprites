@@ -346,7 +346,44 @@ namespace ThreeDee
             }
 
             rend.ProcessModelParenting(false);
-            
+            ReleaseSpriteTiles(handle);
+            Sprites.Remove(handle);
+        }
+
+        /// <summary>
+        /// Disables a 3D model and cancels any pending commands for a renderer but does not deallocate internal
+        /// space for tiles and registrations so that another sprite may be swapped into this one's spot.
+        /// </summary>
+        /// <param name="handle"></param>
+        public void ReleaseDestSprite(int handle)
+        {
+            var rend = Sprites[handle].Rend;
+            if (!ThreeDeeSurfaceChain.AppQuitting && rend.ModelTrans.gameObject.activeSelf)
+                rend.ModelTrans.gameObject.SetActive(false);
+
+            if (rend.LastCommandHandle >= 0 && RenderCommands.Count > 0)
+            {
+                CancelCommand(rend.LastCommandHandle);
+                rend.FlagRenderRequestComplete();
+            }
+
+            rend.ProcessModelParenting(false);
+        }
+
+        /// <summary>
+        /// Releases internal data used by the sprite without affecting its 3D model. Used
+        /// when a sprite needs to swap into another location.
+        /// </summary>
+        /// <param name="handle"></param>
+        public void ReleaseSourceSprite(int handle)
+        {
+            var rend = Sprites[handle].Rend;
+            if (rend.LastCommandHandle >= 0 && RenderCommands.Count > 0)
+            {
+                CancelCommand(rend.LastCommandHandle);
+                rend.FlagRenderRequestComplete();
+            }
+
             ReleaseSpriteTiles(handle);
             Sprites.Remove(handle);
         }
@@ -354,11 +391,11 @@ namespace ThreeDee
         /// <summary>
         /// Given a handle id, returns the internal data used to reference a sprite.
         /// </summary>
-        /// <param name="handle"></param>
+        /// <param name="spriteHandle"></param>
         /// <returns></returns>
-        public RegisteredSprite QueryInternalSpriteData(int handle)
+        public RegisteredSprite QueryInternalSpriteData(int spriteHandle)
         {
-            return Sprites[handle];
+            return Sprites[spriteHandle];
         }
 
         /// <summary>

@@ -11,6 +11,7 @@ namespace ThreeDee
     [DefaultExecutionOrder(ThreeDeeSpriteSurface.ExecutionOrder)]
     public class ThreeDeeSpriteRenderer : MonoBehaviour, IThreeDeeSpriteRenderer
     {
+        #region Properties
         [SerializeField]
         [HideInInspector]
         int _TileResolution = 1;
@@ -28,7 +29,7 @@ namespace ThreeDee
                     _TileResolution = value;
                     if (SpriteHandle >= 0)
                     {
-                        ReleaseSprite();
+                        ReleaseSprite(true);
                         AllocateSprite();
                     }
                     SpriteBillboardScale = TileResolution / PrerenderScale;
@@ -152,6 +153,7 @@ namespace ThreeDee
 
         public bool Allocated { get; private set; }
         public int LastCommandHandle { get; private set; }
+        #endregion
 
 
         bool Started;
@@ -190,9 +192,7 @@ namespace ThreeDee
 
         private void OnDisable()
         {
-            ReleaseSprite();
-            if(_DescriptorAsset.CompactSpritesOnDisable)
-                ThreeDeeSurfaceChain.Instance.CompactSprites();
+            ReleaseSprite(true);
         }
 
         private void OnDestroy()
@@ -245,13 +245,14 @@ namespace ThreeDee
         /// <summary>
         /// 
         /// </summary>
-        void ReleaseSprite()
+        void ReleaseSprite(bool allowSwapping)
         {
             if (ThreeDeeSurfaceChain.Instance == null || SpriteHandle < 0)
                 return;
 
             Allocated = false;
-            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, SurfaceHandle);
+            ThreeDeeSurfaceChain.Instance.ReleaseSprite(SpriteHandle, SurfaceHandle, allowSwapping);
+            this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = null;
             SpriteHandle = -1;
             SurfaceHandle = -1;
         }
@@ -323,8 +324,8 @@ namespace ThreeDee
         /// <param name="spriteHandle"></param>
         public void UpdateHandles(int surfaceHandle, int spriteHandle, Material surfaceMaterial)
         {
-            SpriteHandle = spriteHandle;
             SurfaceHandle = surfaceHandle;
+            SpriteHandle = spriteHandle;
             this.SpriteBillboard.GetComponent<MeshRenderer>().sharedMaterial = surfaceMaterial;
             Allocated = spriteHandle >= 0;
             //AlignBillboard();

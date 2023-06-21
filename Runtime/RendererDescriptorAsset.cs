@@ -32,8 +32,5 @@ namespace ThreeDee
 
         [Tooltip("If set, the 3D model will be unparented upon creation and when enabled and reparented upon being disabled or destroyed.")]
         public ModelParentModes ModelParentMode = ModelParentModes.UnparentOnly;
-
-        [Tooltip("Should the Surface Chain compact all sprites when any sprite using this asset is disabled? This can potentially increase framerate though it may cause large frame spikes if many objects are frequently disabled.")]
-        public bool CompactSpritesOnDisable = false; //leave this false! currently buggy as fuck!!
     }
 }

@@ -1,3 +1,6 @@
+//#define SORT_FOR_SWAP
+//#define SWAP
+
 using Sirenix.OdinInspector;
 using System.Collections.Generic;
 using UnityEngine;
@@ -23,9 +26,10 @@ namespace ThreeDee
         public const int ExecutionOffset = 1;
         public static ThreeDeeSurfaceChain Instance { get; private set; }
 
-        [InfoBox("Experimental: This feature is not currently working and should remain disabled.", InfoMessageType.Warning)]
         [Tooltip("When there is not enough room on any currently existing surfaces, should sprites be compacted before creating a new surface?")]
         public bool CompactSpritesOnAlloc = false;
+        [Tooltip("If a sprite is disabled, last sprite in the surface chain of the same size will be swapped into its position, thus allowing for efficient compacting of sprites. Generates a small amount of garbage during the swap.")]
+        public bool SwapDisabledSprites = true;
 
         [SceneObjectsOnly]
         [Tooltip("A set of pre-configured surfaces that already exist in the scene. These will be used to render sprites to billboards.")]
@@ -37,7 +41,7 @@ namespace ThreeDee
         public float CompactTimeLimiter = 5;
         float LastCompactTime;
         readonly List<IThreeDeeSpriteRenderer> CompactingSpriteList = new(128);
-
+        readonly Dictionary<int, SpriteBucket> SpriteSizeBuckets = new();
 
         #region Unity Events
         public void Awake()
@@ -155,15 +159,15 @@ namespace ThreeDee
         /// <param name="spriteRef"></param>
         /// <param name="forceChainId"></param>
         /// <returns></returns>
-        public (int surfaceId, int spriteHandle) ReallocateSprite(IThreeDeeSpriteRenderer spriteRef, int handle, int chainId)
+        public (int surfaceId, int spriteHandle) ReallocateSprite(IThreeDeeSpriteRenderer spriteRef, int spriteHandle, int surfaceHandle)
         {
-            var oldSpriteData = Surfaces[chainId].QueryInternalSpriteData(handle);
+            var oldSpriteData = Surfaces[surfaceHandle].QueryInternalSpriteData(spriteHandle);
             Assert.IsNotNull(oldSpriteData);
 
-            ReleaseSprite(handle, chainId);
-            (chainId, handle) = AllocateNewSprite(spriteRef);
+            ReleaseSprite(spriteHandle, surfaceHandle, false);
+            (surfaceHandle, spriteHandle) = AllocateNewSprite(spriteRef);
 
-            return (chainId, handle);
+            return (surfaceHandle, spriteHandle);
         }
 
         /// <summary>
@@ -172,20 +176,25 @@ namespace ThreeDee
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns>The chain id and sprite handles.</returns>
-        public (int surfaceId, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer spriteRef, bool compacting = false)
+        public (int surfaceHandle, int spriteHandle) AllocateNewSprite(IThreeDeeSpriteRenderer rend, bool compacting = false)
         {
-            var desc = spriteRef.DescriptorAsset;
+            var desc = rend.DescriptorAsset;
+            int surfaceHandle;
 
             switch(desc.SurfaceIDMode)
             {
                 case RendererDescriptorAsset.SurfaceIdModes.FirstAvailable:
                     {
                         //try each surface until one gives a successful handle
-                        for (int i = 0; i < Surfaces.Count; i++)
+                        for (surfaceHandle = 0; surfaceHandle < Surfaces.Count; surfaceHandle++)
                         {
-                            var handle = Surfaces[i].AllocateNewSprite(spriteRef);
-                            if (handle >= 0)
-                                return (i, handle);
+                            var spriteHandle = Surfaces[surfaceHandle].AllocateNewSprite(rend);
+                            if (spriteHandle >= 0)
+                            {
+                                if(SwapDisabledSprites) 
+                                    RegisterSpriteForSwapbackLookup(surfaceHandle, spriteHandle);
+                                return (surfaceHandle, spriteHandle);
+                            }
                         }
                         break;
                     }
@@ -198,12 +207,16 @@ namespace ThreeDee
             if(CompactSpritesOnAlloc && !compacting)
                 CompactSprites();
 
-            int surfaceHandle = CreateNewSurface(desc);
+            surfaceHandle = CreateNewSurface(desc);
             if (surfaceHandle >= 0)
             {
-                int spriteHandle = Surfaces[surfaceHandle].AllocateNewSprite(spriteRef);
+                int spriteHandle = Surfaces[surfaceHandle].AllocateNewSprite(rend);
                 if (spriteHandle >= 0)
+                {
+                    if(SwapDisabledSprites) 
+                        RegisterSpriteForSwapbackLookup(surfaceHandle, spriteHandle);
                     return (surfaceHandle, spriteHandle);
+                }
             }
 
             throw new UnityException("Could not allocate a sprite on any available rendering surfaces in the chain.");
@@ -212,28 +225,108 @@ namespace ThreeDee
         /// <summary>
         /// Deallocates a previously allocated space on the render target that was reserved for a sprite.
         /// </summary>
-        /// <param name="handle"></param>
-        public void ReleaseSprite(int handle, int chainId)
+        /// <param name="spriteHandle"></param>
+        public void ReleaseSprite(int spriteHandle, int surfaceHandle, bool allowSwapping = true)
         {
-            Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReleaseSprite(handle);
+            if (AppQuitting) return;
 
+            Assert.IsTrue(surfaceHandle >= 0);
+            Assert.IsTrue(surfaceHandle < Surfaces.Count);
+
+            if (SwapDisabledSprites)
+            {
+                //attempt to swap the furthest-back sprite into the spot of the removed one
+                if(allowSwapping && RemoveSpriteSwapBack(spriteHandle, surfaceHandle))
+                        return;
+                //otherwise just remove the sprite as normal
+                var registered = Surfaces[surfaceHandle].QueryInternalSpriteData(spriteHandle);
+                var bucket = SpriteSizeBuckets[registered.Rend.TileResolution];
+                bucket.Remove(surfaceHandle, registered.AllocatedTiles[0]);
+            }
+            Surfaces[surfaceHandle].ReleaseSprite(spriteHandle);
         }
         
         /// <summary>
         /// Re-allocates all registered sprites. Useful when changing tilemap sizes and scales.
         /// </summary>
-        public void ReallocateTiles(int chainId)
+        public void ReallocateTiles(int surfaceHandle)
         {
-            Assert.IsTrue(chainId >= 0);
-            Assert.IsTrue(chainId < Surfaces.Count);
-            Surfaces[chainId].ReallocateTiles();
+            Assert.IsTrue(surfaceHandle >= 0);
+            Assert.IsTrue(surfaceHandle < Surfaces.Count);
+            Surfaces[surfaceHandle].ReallocateTiles();
         }
         #endregion
 
-        
+
         #region Private Methods
+        /// <summary>
+        /// Internally registers a threedee sprite renderer in a sorted order so that later it can be quickly
+        /// lookup when remove-swap-back operations need to be performed.
+        /// </summary>
+        /// <param name="rend"></param>
+        void RegisterSpriteForSwapbackLookup(int surfaceHandle, int spriteHandle)
+        {
+            var surf = Surfaces[surfaceHandle];
+            var regSprite = surf.QueryInternalSpriteData(spriteHandle);
+            var rend = regSprite.Rend;
+            if (!SpriteSizeBuckets.TryGetValue(rend.TileResolution, out var bucket))
+            {
+                bucket = new SpriteBucket();
+                SpriteSizeBuckets.Add(rend.TileResolution, bucket);
+            }
+            bucket.InsertAtBack(surfaceHandle, spriteHandle, regSprite.AllocatedTiles[0]);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <exception cref="System.Exception"></exception>
+        bool RemoveSpriteSwapBack(int spriteHandle, int surfaceHandle)
+        {
+            var destSurface = Surfaces[surfaceHandle];
+            var registered = destSurface.QueryInternalSpriteData(spriteHandle);
+            int tilePos = registered.AllocatedTiles[0];
+            var bucket = SpriteSizeBuckets[registered.Rend.TileResolution];
+
+            //check to ensure the sprite being swapped out isn't actually the back one.
+            //if so we can skip this whole process
+            if (bucket.IsLast(surfaceHandle, tilePos))
+                return false;
+
+            //get the state of the sprite that is being swapped in
+            var backSpriteInBucket = bucket.RemoveBack();
+            if (backSpriteInBucket == null)
+                return false; //no other sprites left to swap in, do nothing
+
+            /*
+            //clear state of the old sprite that is being removed, but leave the bucket ref since we're recycling it
+            var oldRend = registered.Rend;
+            oldRend.UpdateHandles(-1, -1, null);
+            destSurface.ReleaseDestSprite(spriteHandle);
+
+            //unregister the swap-in sprite from its old surface
+            var swapSurf = Surfaces[backSpriteInBucket.SurfaceHandle];
+            var swapSpriteReg = swapSurf.QueryInternalSpriteData(backSpriteInBucket.SpriteHandle);
+            var swapRend = swapSpriteReg.Rend;
+            swapSurf.ReleaseSourceSprite(backSpriteInBucket.SpriteHandle);
+
+            //finally, swap the actual renderer reference and indicies as well as update the bucket sorting info
+            registered.Rend = swapRend;
+            swapRend.UpdateHandles(surfaceHandle, spriteHandle, GetSurfaceBillboardMaterial(surfaceHandle)); //this will force a render update
+            */
+
+            var swapSurf = Surfaces[backSpriteInBucket.SurfaceHandle];
+            var swapSpriteReg = swapSurf.QueryInternalSpriteData(backSpriteInBucket.SpriteHandle);
+            var swapRend = swapSpriteReg.Rend;
+
+
+            destSurface.ReleaseSprite(spriteHandle);
+            swapSurf.ReleaseSprite(backSpriteInBucket.SpriteHandle);
+            (int newSurfaceHandle, int newSpriteHandle) = AllocateNewSprite(swapRend, false);
+            swapRend.UpdateHandles(newSurfaceHandle, newSpriteHandle, GetSurfaceBillboardMaterial(newSurfaceHandle));
+            return true;
+        }
+
         /// <summary>
         /// Helper for creating a new surface by duplicating a render texture asset.
         /// </summary>
