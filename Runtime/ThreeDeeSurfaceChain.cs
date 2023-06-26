@@ -5,6 +5,7 @@ using Sirenix.OdinInspector;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Assertions;
+using UnityEngine.Events;
 
 namespace ThreeDee
 {
@@ -36,6 +37,8 @@ namespace ThreeDee
         public List<ThreeDeeSpriteSurface> Surfaces;
 
         public static bool AppQuitting { get; private set; } = false;
+
+        public UnityEvent<int, ThreeDeeSpriteSurface> OnCreatedNewSurface;
 
 
         public float CompactTimeLimiter = 5;
@@ -357,6 +360,7 @@ namespace ThreeDee
                 dupeSurface.PrerenderCamera.targetTexture.name = $"Surface RT ({surfaceHandle} - duped)";
                 dupeSurface.BillboardMaterial.name = $"Surface Mat ({surfaceHandle} - duped)";
                 dupeSurface.transform.SetParent(this.transform, true);
+                OnCreatedNewSurface.Invoke(surfaceHandle, dupeSurface);
                 return surfaceHandle;
             }
 
