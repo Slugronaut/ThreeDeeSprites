@@ -5,7 +5,7 @@ using UnityEngine;
 namespace ThreeDee
 {
     /// <summary>
-    /// Asset used to describe how a <see cref="ThreeDeeSpriteRenderer"/> should be allocated to abailable surfaces.
+    /// Asset used to describe how a <see cref="ThreeDeeSpriteRenderer"/> should be allocated to available surfaces.
     /// </summary>
     [CreateAssetMenu(fileName = "ThreeDeeSprite Descriptor", menuName = "ThreeDeeSprites/Renderer Descriptor")]
     public class RendererDescriptorAsset : ScriptableObject
@@ -23,7 +23,7 @@ namespace ThreeDee
             UnparentOnly,
         }
 
-        [Tooltip("The RenderTexture wrapper surface object to dupelicate when more tile spaces are needed.")]
+        [Tooltip("The RenderTexture wrapper surface object to duplicate when more tile spaces are needed.")]
         [AssetsOnly]
         public ThreeDeeSpriteSurface SurfacePrefab;
 
