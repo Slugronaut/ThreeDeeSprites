@@ -2,7 +2,9 @@
     "name": "com.postegames.threedeesprites",
     "rootNamespace": "",
     "references": [
+        "GUID:defd78b9ce67e6e4fb737a4ef35a68dd",
         "GUID:52416e693a1827a41babe60c0bb871b1",
+        "GUID:13415da0b68dae24da63ed8e46d7345f",
         "GUID:df380645f10b7bc4b97d4f5eb6303d95",
         "GUID:15fc0a57446b3144c949da3e2b9737a9"
     ],

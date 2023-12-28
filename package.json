@@ -16,6 +16,8 @@
     "url": "http:/postegames.com"
   },
   "dependencies": {
-    "com.postegames.mathutils": ""
+    "com.postegames.mathutils": "",
+    "com.postegames.frametickable": "",
+    "com.postegames.playerloopinjector": ""
   }
 }

@@ -41,8 +41,8 @@ namespace ThreeDee
         public UnityEvent<int, ThreeDeeSpriteSurface> OnCreatedNewSurface;
 
 
-        public float CompactTimeLimiter = 5;
-        float LastCompactTime;
+        public double CompactTimeLimiter = 5;
+        double LastCompactTime;
         readonly List<IThreeDeeSpriteRenderer> CompactingSpriteList = new(128);
         readonly Dictionary<int, SpriteBucket> SpriteSizeBuckets = new();
 
@@ -77,9 +77,9 @@ namespace ThreeDee
         [Button("Compact Sprites")]
         public void CompactSprites()
         {
-            if (Time.time - LastCompactTime < CompactTimeLimiter)
+            if (Time.timeAsDouble - LastCompactTime < CompactTimeLimiter)
                 return;
-            LastCompactTime = Time.time;
+            LastCompactTime = Time.timeAsDouble;
 
             foreach(var surface in Surfaces)
                 CompactingSpriteList.AddRange(surface.ReleaseAllForCompacting());

@@ -1,3 +1,4 @@
+using Peg.Systems;
 using UnityEngine;
 
 namespace ThreeDee
@@ -7,7 +8,7 @@ namespace ThreeDee
     /// This can be used to rotate a 3D model that is being prerendered so that the sprite matches
     /// the true facing direction of the real world-space object relative to a camera.
     /// </summary>
-    public class CameraRelativeFacing : MonoBehaviour
+    public class CameraRelativeFacing : MonoBehaviour, IFrameTickable
     {
         public enum ViewModes
         {
@@ -33,18 +34,24 @@ namespace ThreeDee
         [Tooltip("Is the position only determined around a single vertical axis or can it handle full 3D positioning?")]
         public ViewModes Mode;
 
-
+        public bool TickEnabled => enabled;
 
         private void Start()
         {
+            FrameTickSystem.Instance.Register(this);
             if (Viewer == null)
                 Viewer = Camera.main.transform;
+        }
+
+        void OnDestroy()
+        {
+            FrameTickSystem.Instance.Unregister(this);
         }
 
         /// <summary>
         /// 
         /// </summary>
-        void Update()
+        public void OnTick()
         {
             if (Mode == ViewModes.Upright)
                 Target.eulerAngles = QuantizedBillboardRotationRelative(YawAngleSnap, Observed.position, Observed.forward, Viewer.position, ViewerOffset, Viewer.forward);
