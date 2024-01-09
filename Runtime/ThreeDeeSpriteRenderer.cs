@@ -1,3 +1,4 @@
+#define ROTATE_BY_SHADER //set this if we are going to rotate local models using a shader rather than rotating the gameobjects themselves
 using Sirenix.OdinInspector;
 using System.Collections;
 using UnityEngine;
@@ -117,6 +118,9 @@ namespace ThreeDee
             }
         }
 
+        [Tooltip("An adjustment world-space offset applied to the 3D model when positioning it for the pre-render camera.")]
+        public Vector3 ModelOffset;
+
         [SerializeField]
         [HideInInspector]
         MeshFilter _SpriteBillboard;
@@ -212,10 +216,11 @@ namespace ThreeDee
         {
             RenderCmd = new RenderCommand(
                         this.SpriteHandle,
+                        this._DescriptorAsset.RepositionModel,
                         this.TileResolution,
                         this.PrerenderScale,
                         TileOffset,
-                        Vector3.zero,
+                        ModelOffset,
                         ModelTrans,
                         SurfaceHandle
                         );
@@ -372,6 +377,9 @@ namespace ThreeDee
                             {
                                 OriginalModelParent = ModelTrans.parent;
                                 ModelTrans.SetParent(null);
+                                #if ROTATE_BY_SHADER
+                                ModelTrans.SetLocalPositionAndRotation(ModelTrans.position, Quaternion.identity);
+                                #endif
                             }
                             break;
                         }
@@ -381,6 +389,9 @@ namespace ThreeDee
                             {
                                 OriginalModelParent = ModelTrans.parent;
                                 ModelTrans.SetParent(null);
+                                #if ROTATE_BY_SHADER
+                                ModelTrans.SetLocalPositionAndRotation(ModelTrans.position, Quaternion.identity);
+                                #endif
                             }
                             break;
                         }

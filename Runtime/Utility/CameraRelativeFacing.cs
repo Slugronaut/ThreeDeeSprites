@@ -1,4 +1,5 @@
 using Peg.Systems;
+using System;
 using UnityEngine;
 
 namespace ThreeDee
@@ -55,7 +56,26 @@ namespace ThreeDee
         {
             if (Mode == ViewModes.Upright)
                 Target.eulerAngles = QuantizedBillboardRotationRelative(YawAngleSnap, Observed.position, Observed.forward, Viewer.position, ViewerOffset, Viewer.forward);
-            else RotateObjectTowardsTargets(Viewer, Observed, Target);
+            else Target.rotation = GetRotationTowardTarget(Observed.position, Observed.forward, Viewer.position, ViewerOffset);
+        }
+
+        #region Static Helper Methods
+        public static Quaternion GetRotationTowardTarget(Vector3 observedPos, Vector3 observedForward, Vector3 viewerPos, Vector3 viewerOffset)
+        {
+            Vector3 relativeDirection = observedPos - (viewerPos + viewerOffset);
+            Vector3 observedDirection = observedForward;
+
+            //Quaternion facingRot = Quaternion.LookRotation(observedDirection, Viewer.forward);
+            Quaternion viewerYaw = Quaternion.LookRotation(relativeDirection, Vector3.up);
+            Quaternion observedYaw = Quaternion.LookRotation(observedDirection, Vector3.up);
+
+            Quaternion newRotation = Quaternion.Inverse(viewerYaw) * Quaternion.Inverse(observedYaw);
+            var euler = newRotation.eulerAngles;
+
+            euler.x = Mathf.Round(euler.x / PitchAngleSnap) * PitchAngleSnap;
+            euler.y = Mathf.Round(euler.y / YawAngleSnap) * YawAngleSnap;
+            euler.z = Mathf.Round(euler.z / PitchAngleSnap) * PitchAngleSnap;
+            return Quaternion.Euler(euler);
         }
 
         /// <summary>
@@ -86,33 +106,11 @@ namespace ThreeDee
             var viewForward = targetPos - viewerPos;
             var quantRot = Quaternion.LookRotation(viewForward.normalized, Vector3.up).eulerAngles;
             quantRot.x = 0;
-            quantRot.y = Mathf.Round(quantRot.y / CameraRelativeFacing.YawAngleSnap) * yawAngleSnap;
+            //quantRot.y = Mathf.Round(quantRot.y / CameraRelativeFacing.YawAngleSnap) * yawAngleSnap;
+            quantRot.y = Mathf.Round(quantRot.y / yawAngleSnap) * yawAngleSnap;
             quantRot.z = 0;
             return quantRot;
         }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="viewer"></param>
-        /// <param name="observed"></param>
-        /// <param name="objectToRotate"></param>
-        public void RotateObjectTowardsTargets(Transform viewer, Transform observed, Transform objectToRotate)
-        {
-            Vector3 relativeDirection = observed.position - (viewer.position + ViewerOffset);
-            Vector3 observedDirection = observed.forward;
-
-            //Quaternion facingRot = Quaternion.LookRotation(observedDirection, Viewer.forward);
-            Quaternion viewerYaw = Quaternion.LookRotation(relativeDirection, Vector3.up);
-            Quaternion observedYaw = Quaternion.LookRotation(observedDirection, Vector3.up);
-
-            Quaternion newRotation = Quaternion.Inverse(viewerYaw) * Quaternion.Inverse(observedYaw);
-            var euler = newRotation.eulerAngles;
-
-            euler.x = Mathf.Round(euler.x / PitchAngleSnap) * PitchAngleSnap;
-            euler.y = Mathf.Round(euler.y / YawAngleSnap) * YawAngleSnap;
-            euler.z = Mathf.Round(euler.z / PitchAngleSnap) * PitchAngleSnap;
-            objectToRotate.rotation = Quaternion.Euler(euler);
-        }
+        #endregion
     }
 }

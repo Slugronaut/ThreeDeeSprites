@@ -25,6 +25,11 @@ namespace ThreeDee
             FrameTickSystem.Instance.Unregister(this);
         }
 
+        void OnEnable()
+        {
+
+        }
+
         public void OnTick()
         {
             Vector3 dir = CamTrans.forward;

@@ -27,6 +27,9 @@ namespace ThreeDee
         [AssetsOnly]
         public ThreeDeeSpriteSurface SurfacePrefab;
 
+        [Tooltip("Should the gameobject containing the model actually be repositioned in front of the pre-render camera that will use it? If disabled, the position will instead be set to the local material's _ThreeDeeSprite_PreRenderPos value to be used in a shader to perform the actual vertex transformation.")]
+        public bool RepositionModel = true;
+
         [Tooltip("The method used to decide which surfaces to check for tile space when allocating a sprite.")]
         public SurfaceIdModes SurfaceIDMode = SurfaceIdModes.FirstAvailable;
 

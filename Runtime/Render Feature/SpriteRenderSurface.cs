@@ -6,7 +6,7 @@ namespace ThreeDee
     /// <summary>
     /// 
     /// </summary>
-    [CreateAssetMenu(fileName = "Sprite Render Surface", menuName = "Assets/Sprite Render Surface")]
+    [CreateAssetMenu(fileName = "Sprite Render Surface", menuName = "ThreeDeeSprites/Sprite Render Surface")]
     public class SpriteRenderSurface : ScriptableObject
     {
         public bool DirtyFlag = false;

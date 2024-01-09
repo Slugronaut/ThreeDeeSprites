@@ -27,6 +27,8 @@ namespace ThreeDee
         public const int ExecutionOffset = 1;
         public static ThreeDeeSurfaceChain Instance { get; private set; }
 
+        [Tooltip("Should we manually trigger camera rendering in Update()? This may cause some issues with animations but also fix other issues with flickering sprites. Cannot be changed during runtime.")]
+        public bool ManualRendering = true;
         [Tooltip("When there is not enough room on any currently existing surfaces, should sprites be compacted before creating a new surface?")]
         public bool CompactSpritesOnAlloc = false;
         [Tooltip("If a sprite is disabled, last sprite in the surface chain of the same size will be swapped into its position, thus allowing for efficient compacting of sprites. Generates a small amount of garbage during the swap.")]
@@ -330,6 +332,19 @@ namespace ThreeDee
             return true;
         }
 
+
+        /// <summary>
+        /// The method of positioning pre-render cameras in worldspace so that they don't overlap contents.
+        /// </summary>
+        public enum CameraStackingModes
+        {
+            Depth,
+            SideBySide,
+        }
+
+        [Tooltip("The method of positioning pre-render cameras in worldspace so that they don't overlap contents.")]
+        public CameraStackingModes CameraStackingMode = CameraStackingModes.Depth;
+
         /// <summary>
         /// Helper for creating a new surface by duplicating a render texture asset.
         /// </summary>
@@ -345,13 +360,29 @@ namespace ThreeDee
 
                 if (surfaceHandle > 0)
                 {
-                    //So... we have more than one surface in the chain already, we need to offset this one
-                    //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
-                    //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
-                    var prevSurface = Surfaces[surfaceHandle - 1];
-                    var pos = prevSurface.transform.position +
-                                new Vector3(0, 0, DupedSurfaceOffsetDirection * (DupedSurfaceOffsetMargin + prevSurface.PrerenderCamera.farClipPlane));
-                    dupeSurface.transform.position = pos;
+                    //I decided to add different stacking methods because I needed to do side-by-side stacking because depth
+                    //issues with my cameras necessitated much larger far planes but I didn't want to fuck up any older setups.
+                    if (CameraStackingMode == CameraStackingModes.Depth)
+                    {
+
+                        //So... we have more than one surface in the chain already, we need to offset this one
+                        //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
+                        //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
+                        var prevSurface = Surfaces[surfaceHandle - 1];
+                        var pos = prevSurface.transform.position +
+                                    new Vector3(0, 0, DupedSurfaceOffsetDirection * (DupedSurfaceOffsetMargin + prevSurface.PrerenderCamera.farClipPlane));
+                        dupeSurface.transform.position = pos;
+                    }
+                    else
+                    {
+                        //So... we have more than one surface in the chain already, we need to offset this one
+                        //by some value to ensure it doesn't overlap with any others. Let's take the previous surface,
+                        //and offset its z-position by it's camera's depth to get our new offset (plus a little extra)
+                        var prevSurface = Surfaces[surfaceHandle - 1];
+                        var pos = prevSurface.transform.position +
+                                    new Vector3(DupedSurfaceOffsetDirection * prevSurface.PrerenderCamera.orthographicSize * 2, 0, 0);
+                        dupeSurface.transform.position = pos;
+                    }
                 }
                 else dupeSurface.transform.position = Vector3.zero;
 
@@ -376,6 +407,7 @@ namespace ThreeDee
         ThreeDeeSpriteSurface DuplicateSurface(ThreeDeeSpriteSurface surfacePrefab)
         {
             var surface = Instantiate(surfacePrefab);
+            surface.ManualRendering = this.ManualRendering;
             var dupedRT = new RenderTexture(surfacePrefab.PrerenderCamera.targetTexture);
             dupedRT.filterMode = surfacePrefab.PrerenderCamera.targetTexture.filterMode; //this isn't being duped properly
             var dupedMat = new Material(surfacePrefab.BillboardMaterial);

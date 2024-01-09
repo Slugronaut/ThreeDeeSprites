@@ -34,6 +34,7 @@ namespace ThreeDee
         public bool ConsoleLogEvents;
 #endif
 
+
         [SerializeField]
         [HideInInspector]
         float _PixelScale = 1;
@@ -104,6 +105,29 @@ namespace ThreeDee
 
         #endregion
 
+        [SerializeField]
+        bool _ManualRendering;
+        public bool ManualRendering
+        { 
+            get => _ManualRendering;
+            set
+            {
+                _ManualRendering = value;
+                PrerenderCamera.enabled = !value;
+            }
+        }
+        bool _RenderEnabled;
+        public bool RenderEnabled
+        {
+            get => ManualRendering ? _RenderEnabled : PrerenderCamera.enabled;
+
+            set
+            {
+                _RenderEnabled = value;
+                PrerenderCamera.enabled = ManualRendering ? false : value;
+            }
+        }
+
 
         #region Private Fields
         public int ScreenWidth { get; private set; }
@@ -127,6 +151,7 @@ namespace ThreeDee
             Shader.PropertyToID("_BaseMap")
             };
 
+        static int PreRenderPosProp = Shader.PropertyToID("_ThreeDeeSprite_PreRenderPos");
         #endregion
 
 
@@ -142,13 +167,13 @@ namespace ThreeDee
         /// <summary>
         /// 
         /// </summary>
-        void LateUpdate()
+        void Update()
         {
-            if (PrerenderCamera.enabled)
+            if (RenderEnabled)
             {
                 if (Sprites.Count < 1)
                 {
-                    PrerenderCamera.enabled = false;
+                    RenderEnabled = false;
 #if UNITY_EDITOR
                     if (ConsoleLogEvents)
                         Debug.Log($"DISABLED Prerender Cam #{this.gameObject.name}");
@@ -157,7 +182,7 @@ namespace ThreeDee
             }
             else if (Sprites.Count > 0)
             {
-                PrerenderCamera.enabled = true;
+                RenderEnabled = true;
 
 #if UNITY_EDITOR
                 if (ConsoleLogEvents)
@@ -166,7 +191,7 @@ namespace ThreeDee
             }
 
 
-            if (!PrerenderCamera.enabled)
+            if (!RenderEnabled)//!ManualRendering && !PrerenderCamera.enabled)
                 return;
 
 #if UNITY_EDITOR
@@ -175,6 +200,8 @@ namespace ThreeDee
 #endif
 
             ProcessRenderCommands();
+            if(ManualRendering)
+                this.PrerenderCamera.Render();
         }
         #endregion
 
@@ -226,7 +253,16 @@ namespace ThreeDee
             tileScale /= ScreenHeight;
             var center = Sprites[com.SpriteHandle].Rect.center + com.Offset2D * tileScale;
 
-            com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+            if (com.RepositionModel)
+                com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+            else
+            {
+                //EXPERIMENTAL! Doesn't currently work due to limits in shader graph with veticies in object space only
+                var modelPos = -com.ModelRoot.position + _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+                var rend = com.ModelRoot.GetComponentInChildren<SkinnedMeshRenderer>(true);
+                foreach (var mat in rend.sharedMaterials)
+                    mat.SetVector(PreRenderPosProp, modelPos);
+            }
             com.ModelRoot.SetGlobalScale(Vector3.one * com.SpriteScale);
         }
 
