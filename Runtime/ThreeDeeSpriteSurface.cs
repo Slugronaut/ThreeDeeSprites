@@ -542,14 +542,30 @@ namespace ThreeDee
             //Winding order
             // 0 1
             // 2 3
-            var uvs = quad.uv;
-            uvs[0].Set(rect.x,               rect.y);
-            uvs[1].Set(rect.x + rect.width,  rect.y);
-            uvs[2].Set(rect.x,               rect.y + rect.height);
-            uvs[3].Set(rect.x + rect.width,  rect.y + rect.width);
+            TempUVs.Clear();
+            quad.GetUVs(UVChannel, TempUVs);
 
-            //quad.SetUVs(UVChannel, TempUV);
-            quad.uv = uvs;
+            var pos = TempUVs[0];
+            pos.x = rect.x;
+            pos.y = rect.y;
+            TempUVs[0] = pos;
+
+            pos = TempUVs[1];
+            pos.x = rect.x + rect.width;
+            pos.y = rect.y;
+            TempUVs[1] = pos;
+
+            pos = TempUVs[2];
+            pos.x = rect.x;
+            pos.y = rect.y + rect.height;
+            TempUVs[2] = pos;
+
+            pos = TempUVs[3];
+            pos.x = rect.x + rect.width;
+            pos.y = rect.y + rect.height;
+            TempUVs[3] = pos;
+
+            quad.SetUVs(UVChannel, TempUVs);
         }
 
         /// <summary>
