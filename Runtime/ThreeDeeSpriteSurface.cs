@@ -1,6 +1,12 @@
-﻿using Sirenix.OdinInspector;
+﻿#define THREEDEE_OPTIMIZEINEDITOR
+using Sirenix.OdinInspector;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Assertions;
 using Debug = UnityEngine.Debug;
@@ -20,8 +26,14 @@ namespace ThreeDee
         public class RegisteredSprite
         {
             public Rect Rect;
-            public int[] AllocatedTiles;
+            public NativeArray<int> AllocatedTiles;
+            //public int[] AllocatedTiles;
             public IThreeDeeSpriteRenderer Rend;
+
+            public void Dispose()
+            {
+                AllocatedTiles.Dispose();
+            }
         }
 
 
@@ -136,7 +148,8 @@ namespace ThreeDee
         int TileCountY;
         int Uids = 0; //incremented each time a sprite is allocated so we can give each a new id
 
-        List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
+        bool[] UsedTiles = new bool[0];
+        //List<bool> UsedTiles = new(); //indicies into the Tiles list of what is currently in use
         readonly Dictionary<int, RegisteredSprite> Sprites = new();
         readonly List<RenderCommand> RenderCommands = new(128);
         float CameraRatio => ScreenHeight / _TileSize / _PixelScale * 0.5f;
@@ -152,6 +165,7 @@ namespace ThreeDee
             };
 
         static int PreRenderPosProp = Shader.PropertyToID("_ThreeDeeSprite_PreRenderPos");
+        static int PreRenderNegateRotProp = Shader.PropertyToID("_ThreeDeeSprite_PreRenderNegateRot");
         #endregion
 
 
@@ -162,6 +176,12 @@ namespace ThreeDee
         private void Awake()
         {
             CreateTileMap(_TileSize);
+        }
+
+        private void OnDestroy()
+        {
+            foreach (var sprite in Sprites.Values)
+                sprite.Dispose();
         }
 
         /// <summary>
@@ -257,11 +277,16 @@ namespace ThreeDee
                 com.ModelRoot.position = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
             else
             {
-                //EXPERIMENTAL! Doesn't currently work due to limits in shader graph with veticies in object space only
-                var modelPos = -com.ModelRoot.position + _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint));
+                var modelPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint)) + com.Offset3D;
                 var rend = com.ModelRoot.GetComponentInChildren<SkinnedMeshRenderer>(true);
+                var oldBounds = rend.bounds;
+                rend.bounds = new Bounds(modelPos, oldBounds.size); //update the bounds to match the virtual position or we'll have culling issues
+                
+                //TODO: can we cache this so that we don't need to generate garbage every frame?
                 foreach (var mat in rend.sharedMaterials)
+                {
                     mat.SetVector(PreRenderPosProp, modelPos);
+                }
             }
             com.ModelRoot.SetGlobalScale(Vector3.one * com.SpriteScale);
         }
@@ -338,14 +363,14 @@ namespace ThreeDee
         /// <returns></returns>
         public int AllocateNewSprite(IThreeDeeSpriteRenderer rend)
         {
-            var (success, rect, indicies) = FindAvailableSpace(rend.TileResolution);
+            var success = FindAvailableSpace(rend.TileResolution, out Rect rect, out NativeArray<int> indicies);
             if (success)
             {
                 int handle = Uids++;
 
                 RegisteredSprite sprite = new()
                 {
-                    AllocatedTiles = indicies,
+                    AllocatedTiles = new NativeArray<int>(indicies, Allocator.Persistent),
                     Rect = rect,
                     Rend = rend,
                 };
@@ -362,6 +387,7 @@ namespace ThreeDee
             }
 
             //uh oh! we have no room left!
+            indicies.Dispose(); //release temp memory
             return -1;
         }
 
@@ -383,6 +409,7 @@ namespace ThreeDee
 
             rend.ProcessModelParenting(false);
             ReleaseSpriteTiles(handle);
+            Sprites[handle].Dispose();
             Sprites.Remove(handle);
         }
 
@@ -421,6 +448,7 @@ namespace ThreeDee
             }
 
             ReleaseSpriteTiles(handle);
+            Sprites[handle].Dispose();
             Sprites.Remove(handle);
         }
 
@@ -442,25 +470,34 @@ namespace ThreeDee
             if (PrerenderCamera.targetTexture == null) return;
             PrerenderCamera.orthographicSize = CameraRatio;
 
-            UsedTiles = new List<bool>(new bool[TileCountX * TileCountY]);
+            UsedTiles = new bool[TileCountX * TileCountY];// new List<bool>(new bool[TileCountX * TileCountY]);
             List<int> removeList = new();
 
             foreach (var kvp in Sprites)
             {
                 var sprite = kvp.Value;
-                var (success, rect, indicies) = FindAvailableSpace(sprite.Rend.TileResolution);
+                var success = FindAvailableSpace(sprite.Rend.TileResolution, out Rect rect, out NativeArray<int> indicies);
                 if (success)
                 {
-                    sprite.AllocatedTiles = indicies;
+                    //we are re-allocating here which means we're overwriting old data.
+                    //this data ain't managed so we NEED to release it first or it'll leak
+                    sprite.Dispose(); 
+                    sprite.AllocatedTiles.CopyFrom(indicies);
                     sprite.Rect = rect;
                     AllocateSpriteTiles(kvp.Key, indicies);
                     ApplyTileRectToMesh(rect, sprite.Rend.SpriteBillboard.mesh);
                 }
                 else removeList.Add(kvp.Key);
+
+                //release temp memory
+                indicies.Dispose();
             }
 
             foreach (var handle in removeList)
+            {
+                Sprites[handle].Dispose();
                 Sprites.Remove(handle);
+            }
         }
 
         /// <summary>
@@ -484,12 +521,17 @@ namespace ThreeDee
         /// <param name="handle"></param>
         void ReleaseSpriteTiles(int handle)
         {
-            int[] indicies = Sprites[handle].AllocatedTiles;
-            foreach (var index in indicies)
-                UsedTiles[index] = false;
+            //int[] indicies = Sprites[handle].AllocatedTiles;
+            //foreach (var index in indicies)
+            //    UsedTiles[index] = false;
+            var indices = Sprites[handle].AllocatedTiles;
+            for (int i = 0; i < indices.Length; i++)
+                UsedTiles[indices[i]] = false;
 
         }
 
+        static readonly int UVChannel = 0;
+        static readonly List<Vector2> TempUVs = new (4);
         /// <summary>
         /// 
         /// </summary>
@@ -515,18 +557,20 @@ namespace ThreeDee
         /// </summary>
         /// <param name="handle"></param>
         /// <param name="indicies"></param>
-        void AllocateSpriteTiles(int handle, int[] indicies)
+        void AllocateSpriteTiles(int handle, NativeArray<int> indicies)
         {
-            foreach (var index in indicies)
-                UsedTiles[index] = true;
+            //foreach (var index in indicies)
+            //    UsedTiles[index] = true;
+            for(int i = 0; i < indicies.Length; i++)
+                UsedTiles[indicies[i]] = true;
         }
 
         /// <summary>
-        /// Searches for an unused 
+        /// Searches for an unused space in the tiles of the surface that is large enough to store a 'tileResolution' squared object.
         /// </summary>
         /// <param name="tileResolution"></param>
         /// <returns></returns>
-        (bool success, Rect rect, int[] tiles) FindAvailableSpace(int tileResolution)
+        bool FindAvailableSpace(int tileResolution, out Rect rect, out NativeArray<int> tiles)
         {
             //now we need to search through the list of rects until we find a space
             for (int y = 0; y <= TileCountY-tileResolution; y++)
@@ -535,54 +579,17 @@ namespace ThreeDee
                 {
                     if (IsTileRangeEmpty(x, y, tileResolution, tileResolution))
                     {
-                        return (true,
-                                CalculateRectFromTile(x, y, tileResolution, tileResolution),
-                                TileIndicesFromRange(x, y, tileResolution, tileResolution));
+                        CalculateRectFromTile(x, y, tileResolution, tileResolution, out rect);
+                        TileIndicesFromRange(x, y, tileResolution, tileResolution, out tiles);
+                        return true;
                     }
                 }
             }
 
-            return (false, Rect.zero, null);
-        }
-
-        /// <summary>
-        /// Returns the linera indicies for a range of tiles.
-        /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <param name="tileWidth"></param>
-        /// <param name="tileHeight"></param>
-        /// <returns></returns>
-        int[] TileIndicesFromRange(int x, int y, int tileWidth, int tileHeight)
-        {
-            AssertTileSizes(x, y, tileWidth, tileHeight);
-
-            int[] output = new int[tileWidth * tileHeight];
-            int count = 0;
-            for (int i = y; i < y+tileHeight; i++)
-            {
-                for (int j = x; j < x+tileWidth; j++, count++)
-                {
-                    output[count] = (i * TileCountX) + j;
-                }
-            }
-
-            return output;
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <returns></returns>
-        bool IsTileEmpty(int x, int y)
-        {
-            Assert.IsTrue(x >= 0);
-            Assert.IsTrue(y >= 0);
-            Assert.IsTrue(x < TileCountX);
-            Assert.IsTrue(y < TileCountY);
-            return !UsedTiles[(y * TileCountX) + x];
+            //we need to fill this with dummy values just for the sake of syntax
+            rect = Rect.zero;
+            tiles = new NativeArray<int>(0, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            return false;
         }
 
         /// <summary>
@@ -595,20 +602,67 @@ namespace ThreeDee
         /// <returns></returns>
         bool IsTileRangeEmpty(int x, int y, int tileWidth, int tileHeight)
         {
+            #if !THREEDEE_OPTIMIZEINEDITOR
             AssertTileSizes(x, y, tileWidth, tileHeight);
+            #endif
 
-            for (int i = y; i < y+tileHeight; i++)
+
+            int rowOffset = y * TileCountX;
+            for (int i = y; i < y + tileHeight; i++)
             {
-                for(int j = x; j < x+tileWidth; j++)
+                for (int j = x; j < x + tileWidth; j++)
                 {
-                    if (UsedTiles[(i * TileCountX) + j])
+                    //if (UsedTiles[(i * TileCountX) + j])
+                    if (UsedTiles[rowOffset + j])
                         return false;
                 }
             }
 
-
-            //Debug.Log($"Empty tile range found for ({x}, {y}) - [{tileWidth}, {tileWidth}]");
             return true;
+
+        }
+
+        /// <summary>
+        /// Returns the linear indicies for a range of tiles.
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <param name="tileWidth"></param>
+        /// <param name="tileHeight"></param>
+        /// <returns></returns>
+        void TileIndicesFromRange(int x, int y, int tileWidth, int tileHeight, out NativeArray<int> output)
+        {
+            #if !THREEDEE_OPTIMIZEINEDITOR
+            AssertTileSizes(x, y, tileWidth, tileHeight);
+            #endif
+
+            output = new NativeArray<int>(tileWidth * tileHeight, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            int count = 0;
+            for (int i = y; i < y+tileHeight; i++)
+            {
+                for (int j = x; j < x+tileWidth; j++, count++)
+                {
+                    output[count] = (i * TileCountX) + j;
+                }
+            }
+
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <param name="y"></param>
+        /// <returns></returns>
+        bool IsTileEmpty(int x, int y)
+        {
+            #if !THREEDEE_OPTIMIZEINEDITOR
+            Assert.IsTrue(x >= 0);
+            Assert.IsTrue(y >= 0);
+            Assert.IsTrue(x < TileCountX);
+            Assert.IsTrue(y < TileCountY);
+            #endif
+            return !UsedTiles[(y * TileCountX) + x];
         }
 
         /// <summary>
@@ -620,9 +674,11 @@ namespace ThreeDee
         /// <param name="widht"></param>
         /// <param name="tileHeight"></param>
         /// <returns></returns>
-        Rect CalculateRectFromTile(int x, int y, int tileWidth, int tileHeight)
+        void CalculateRectFromTile(int x, int y, int tileWidth, int tileHeight, out Rect rect)
         {
+            #if !THREEDEE_OPTIMIZEINEDITOR
             AssertTileSizes(x, y, tileWidth, tileHeight);
+            #endif
             
             float screenWidth = ScreenWidth;
             float screenHeight = ScreenHeight;
@@ -636,7 +692,7 @@ namespace ThreeDee
             float yClip = yPixel / screenHeight;
             float clipWidth = pixelWidth / screenWidth;// * ViewRatio;
             float clipHeight = pixelHeight / screenHeight;// * ViewRatio;
-            return new Rect(xClip, yClip, clipWidth, clipHeight);
+            rect = new Rect(xClip, yClip, clipWidth, clipHeight);
         }
 
         /// <summary>
@@ -681,7 +737,7 @@ namespace ThreeDee
             Assert.IsTrue(x + tileWidth <= TileCountX);
             Assert.IsTrue(y + tileHeight <= TileCountY);
         }
-        #endregion
+#endregion
         
         
         #region Editor
@@ -714,7 +770,7 @@ namespace ThreeDee
                 {
                     Color c = (x % 2 != 0) ? new Color(0.5f, 0.5f, 1, 1) : Color.white;
 
-                    var tile = CalculateRectFromTile(x, y, 1, 1);
+                    CalculateRectFromTile(x, y, 1, 1, out var tile);
                     float tileScale = 1;
 
                     var vert0 = new Vector3(tile.x, tile.y) * tileScale;
@@ -743,7 +799,7 @@ namespace ThreeDee
                     {
                         Color c = Color.red;
 
-                        var tile = CalculateRectFromTile(x, y, 1, 1);
+                        CalculateRectFromTile(x, y, 1, 1, out var tile);
                         float tileScale = 1;
 
                         var vert0 = new Vector3(tile.x, tile.y) * tileScale;

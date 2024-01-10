@@ -268,7 +268,9 @@ namespace ThreeDee
         /// </summary>
         void AlignBillboard()
         {
-            _SpriteBillboard.transform.localPosition = _BillboardOffset + (new Vector3(0, -_TileOffset.y, 0) * SpriteBillboardScale);
+            if (DescriptorAsset.RepositionModel)
+                _SpriteBillboard.transform.localPosition = _BillboardOffset + (new Vector3(0, -_TileOffset.y, 0) * SpriteBillboardScale);
+            else _SpriteBillboard.transform.localPosition = _BillboardOffset + (new Vector3(0, -_TileOffset.y, 0) * SpriteBillboardScale);
         }
 
         /// <summary>
