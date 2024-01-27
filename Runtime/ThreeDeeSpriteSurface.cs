@@ -278,7 +278,11 @@ namespace ThreeDee
             else
             {
                 var modelPos = _PrerenderCamera.ViewportToWorldPoint(new Vector3(center.x, center.y, clipRangeMidpoint)) + com.Offset3D;
+                
+                //TODO: this needs some serious optimization!
                 var rend = com.ModelRoot.GetComponentInChildren<SkinnedMeshRenderer>(true);
+                if (rend == null) return;
+
                 var oldBounds = rend.bounds;
                 rend.bounds = new Bounds(modelPos, oldBounds.size); //update the bounds to match the virtual position or we'll have culling issues
                 
